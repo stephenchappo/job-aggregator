@@ -1,0 +1,42 @@
+services:
+  jobspy-api:
+    image: rainmanjam/jobspy-api:latest
+    container_name: jobspy-api
+    env_file:
+      - /srv/docker/deepthought/.env
+      - .env
+    environment:
+      - API_KEY=${JOBSPY_API_KEY}
+    ports:
+      - "8088:8000"
+    restart: unless-stopped
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "5m"
+        max-file: "3"
+
+  jobspy-db:
+    image: postgres:16-alpine
+    container_name: jobspy-db
+    env_file:
+      - /srv/docker/deepthought/.env
+      - .env
+    environment:
+      - POSTGRES_DB=jobspy
+      - POSTGRES_USER=${JOBSPY_DB_USER}
+      - POSTGRES_PASSWORD=${JOBSPY_DB_PASSWORD}
+    volumes:
+      - ./postgres/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+      - jobspy-db-data:/var/lib/postgresql/data
+    ports:
+      - "5433:5432"
+    restart: unless-stopped
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "5m"
+        max-file: "3"
+
+volumes:
+  jobspy-db-data:

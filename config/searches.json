@@ -1,0 +1,78 @@
+{
+  "searches": [
+    {
+      "search_term": "Site Reliability Engineer",
+      "location": "San Jose, CA",
+      "distance": 50,
+      "job_type": "fulltime",
+      "is_remote": true,
+      "results_wanted": 50,
+      "hours_old": 24
+    },
+    {
+      "search_term": "SRE",
+      "location": "San Francisco, CA",
+      "distance": 50,
+      "job_type": "fulltime",
+      "is_remote": true,
+      "results_wanted": 50,
+      "hours_old": 24
+    },
+    {
+      "search_term": "Staff SRE",
+      "location": "United States",
+      "distance": null,
+      "job_type": "fulltime",
+      "is_remote": true,
+      "results_wanted": 30,
+      "hours_old": 24
+    },
+    {
+      "search_term": "Principal SRE",
+      "location": "United States",
+      "distance": null,
+      "job_type": "fulltime",
+      "is_remote": true,
+      "results_wanted": 30,
+      "hours_old": 24
+    },
+    {
+      "search_term": "DevOps Engineer",
+      "location": "San Jose, CA",
+      "distance": 50,
+      "job_type": "fulltime",
+      "is_remote": true,
+      "results_wanted": 50,
+      "hours_old": 24
+    },
+    {
+      "search_term": "Platform Engineer",
+      "location": "San Jose, CA",
+      "distance": 50,
+      "job_type": "fulltime",
+      "is_remote": true,
+      "results_wanted": 50,
+      "hours_old": 24
+    },
+    {
+      "search_term": "Infrastructure Engineer",
+      "location": "San Jose, CA",
+      "distance": 50,
+      "job_type": "fulltime",
+      "is_remote": true,
+      "results_wanted": 30,
+      "hours_old": 24
+    }
+  ],
+  "sources": ["indeed", "linkedin", "dice", "zip_recruiter"],
+  "filters": {
+    "min_salary": 170000,
+    "target_salary": 200000,
+    "min_years_experience": 5,
+    "exclude_titles": ["junior", "entry level", "associate", "intern", "graduate"],
+    "contract_keywords": ["contract", "c2c", "corp-to-corp", "1099", "w2 only", "w2 contract", "6-month", "12-month", "temp"],
+    "agency_keywords": ["staffing", "recruiting", "talent", "solutions llc", "consulting group", "resources inc", "workforce"],
+    "fte_keywords": ["full-time", "full time", "permanent", "fte", "direct hire"],
+    "senior_keywords": ["staff", "principal", "senior", "sr.", "lead", "head of", "director"]
+  }
+}

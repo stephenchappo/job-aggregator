@@ -1,0 +1,11 @@
+# Secrets
+.env
+docker/.env
+*.secret
+
+# Logs
+*.log
+
+# OS
+.DS_Store
+Thumbs.db
