@@ -9,11 +9,18 @@ REMOTE_HOST="192.168.1.151"
 REMOTE_PATH="/srv/docker/deepthought/jobspy"
 
 echo "==> Syncing to ${REMOTE_USER}@${REMOTE_HOST}:${REMOTE_PATH}"
-ssh "${REMOTE_USER}@${REMOTE_HOST}" "mkdir -p ${REMOTE_PATH}"
+ssh "${REMOTE_USER}@${REMOTE_HOST}" "mkdir -p ${REMOTE_PATH}/postgres"
 
-rsync -av --exclude='.env' --exclude='*.log' \
-  docker/ \
-  "${REMOTE_USER}@${REMOTE_HOST}:${REMOTE_PATH}/"
+# rsync is broken on Windows/Git bash (Cygwin dup() conflict); fall back to scp
+if [[ "$(uname -s)" == MINGW* ]] || [[ "$(uname -s)" == CYGWIN* ]]; then
+  echo "==> Windows detected — using scp instead of rsync"
+  scp docker/docker-compose.yml "${REMOTE_USER}@${REMOTE_HOST}:${REMOTE_PATH}/docker-compose.yml"
+  scp docker/postgres/init.sql  "${REMOTE_USER}@${REMOTE_HOST}:${REMOTE_PATH}/postgres/init.sql"
+else
+  rsync -av --exclude='.env' --exclude='*.log' \
+    docker/ \
+    "${REMOTE_USER}@${REMOTE_HOST}:${REMOTE_PATH}/"
+fi
 
 echo "==> Sync complete."
 
