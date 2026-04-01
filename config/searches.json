@@ -65,6 +65,7 @@
     }
   ],
   "sources": ["indeed", "linkedin", "dice", "zip_recruiter"],
+  "country_indeed": "USA",
   "filters": {
     "min_salary": 170000,
     "target_salary": 200000,
