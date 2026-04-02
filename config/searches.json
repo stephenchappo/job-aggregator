@@ -6,8 +6,7 @@
       "distance": 50,
       "job_type": "fulltime",
       "is_remote": true,
-      "results_wanted": 50,
-      "hours_old": 24
+      "results_wanted": 50
     },
     {
       "search_term": "SRE",
@@ -15,8 +14,7 @@
       "distance": 50,
       "job_type": "fulltime",
       "is_remote": true,
-      "results_wanted": 50,
-      "hours_old": 24
+      "results_wanted": 50
     },
     {
       "search_term": "Staff SRE",
@@ -24,8 +22,7 @@
       "distance": null,
       "job_type": "fulltime",
       "is_remote": true,
-      "results_wanted": 30,
-      "hours_old": 24
+      "results_wanted": 30
     },
     {
       "search_term": "Principal SRE",
@@ -33,8 +30,7 @@
       "distance": null,
       "job_type": "fulltime",
       "is_remote": true,
-      "results_wanted": 30,
-      "hours_old": 24
+      "results_wanted": 30
     },
     {
       "search_term": "DevOps Engineer",
@@ -42,8 +38,7 @@
       "distance": 50,
       "job_type": "fulltime",
       "is_remote": true,
-      "results_wanted": 50,
-      "hours_old": 24
+      "results_wanted": 50
     },
     {
       "search_term": "Platform Engineer",
@@ -51,8 +46,7 @@
       "distance": 50,
       "job_type": "fulltime",
       "is_remote": true,
-      "results_wanted": 50,
-      "hours_old": 24
+      "results_wanted": 50
     },
     {
       "search_term": "Infrastructure Engineer",
@@ -60,8 +54,7 @@
       "distance": 50,
       "job_type": "fulltime",
       "is_remote": true,
-      "results_wanted": 30,
-      "hours_old": 24
+      "results_wanted": 30
     }
   ],
   "sources": ["indeed", "linkedin", "dice", "zip_recruiter"],
