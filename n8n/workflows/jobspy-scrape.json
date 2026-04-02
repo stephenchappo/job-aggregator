@@ -21,7 +21,7 @@
     },
     {
       "parameters": {
-        "jsCode": "// Inline searches config — mirrors config/searches.json\n// Outputs body as a pre-built JSON string so HTTP node preserves int/bool types\nconst searches = [\n  { search_term: \"Site Reliability Engineer\", location: \"San Jose, CA\", distance: 50, job_type: \"fulltime\", is_remote: true, results_wanted: 50 },\n  { search_term: \"SRE\", location: \"San Francisco, CA\", distance: 50, job_type: \"fulltime\", is_remote: true, results_wanted: 50 },\n  { search_term: \"Staff SRE\", location: \"United States\", distance: null, job_type: \"fulltime\", is_remote: true, results_wanted: 30 },\n  { search_term: \"Principal SRE\", location: \"United States\", distance: null, job_type: \"fulltime\", is_remote: true, results_wanted: 30 },\n  { search_term: \"DevOps Engineer\", location: \"San Jose, CA\", distance: 50, job_type: \"fulltime\", is_remote: true, results_wanted: 50 },\n  { search_term: \"Platform Engineer\", location: \"San Jose, CA\", distance: 50, job_type: \"fulltime\", is_remote: true, results_wanted: 50 },\n  { search_term: \"Infrastructure Engineer\", location: \"San Jose, CA\", distance: 50, job_type: \"fulltime\", is_remote: true, results_wanted: 30 }\n];\n\nreturn searches.map(s => ({\n  json: {\n    body: JSON.stringify({\n      search_term: s.search_term,\n      location: s.location,\n      ...(s.distance !== null ? { distance: s.distance } : {}),\n      job_type: s.job_type,\n      is_remote: s.is_remote,\n      results_wanted: s.results_wanted,\n      site_name: [\"indeed\", \"linkedin\", \"dice\", \"zip_recruiter\"],\n      country_indeed: \"USA\"\n    })\n  }\n}));"
+        "jsCode": "// Builds one item per search with body pre-serialised as a string.\n// Using raw body mode on the HTTP node so int/bool types are preserved.\nconst searches = [\n  { search_term: \"Site Reliability Engineer\", location: \"San Jose, CA\", distance: 50, job_type: \"fulltime\", is_remote: true, results_wanted: 50 },\n  { search_term: \"SRE\", location: \"San Francisco, CA\", distance: 50, job_type: \"fulltime\", is_remote: true, results_wanted: 50 },\n  { search_term: \"Staff SRE\", location: \"United States\", distance: null, job_type: \"fulltime\", is_remote: true, results_wanted: 30 },\n  { search_term: \"Principal SRE\", location: \"United States\", distance: null, job_type: \"fulltime\", is_remote: true, results_wanted: 30 },\n  { search_term: \"DevOps Engineer\", location: \"San Jose, CA\", distance: 50, job_type: \"fulltime\", is_remote: true, results_wanted: 50 },\n  { search_term: \"Platform Engineer\", location: \"San Jose, CA\", distance: 50, job_type: \"fulltime\", is_remote: true, results_wanted: 50 },\n  { search_term: \"Infrastructure Engineer\", location: \"San Jose, CA\", distance: 50, job_type: \"fulltime\", is_remote: true, results_wanted: 30 }\n];\n\nreturn searches.map(s => {\n  const payload = {\n    search_term: s.search_term,\n    location: s.location,\n    job_type: s.job_type,\n    is_remote: s.is_remote,\n    results_wanted: s.results_wanted,\n    site_name: [\"indeed\", \"linkedin\", \"dice\", \"zip_recruiter\"],\n    country_indeed: \"USA\"\n  };\n  if (s.distance !== null) payload.distance = s.distance;\n  return { json: { body: JSON.stringify(payload) } };\n});"
       },
       "id": "a1b2c3d4-0001-0001-0001-000000000012",
       "name": "Load Searches",
@@ -43,8 +43,9 @@
           ]
         },
         "sendBody": true,
-        "specifyBody": "json",
-        "jsonBody": "={{ $json.body }}",
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ $json.body }}",
         "options": {
           "timeout": 60000
         }
@@ -113,7 +114,7 @@
     },
     {
       "parameters": {
-        "jsCode": "// Job scoring logic\nconst FILTERS = {\n  minSalary: 170000,\n  targetSalary: 200000,\n  contractKeywords: [\"contract\", \"c2c\", \"corp-to-corp\", \"1099\", \"w2 only\", \"w2 contract\", \"6-month\", \"12-month\", \"temp\"],\n  agencyKeywords: [\"staffing\", \"recruiting\", \"talent\", \"solutions llc\", \"consulting group\", \"resources inc\", \"workforce\"],\n  fteKeywords: [\"full-time\", \"full time\", \"permanent\", \"fte\", \"direct hire\"],\n  seniorKeywords: [\"staff \", \"principal\", \"senior\", \"sr.\", \"lead\", \"head of\", \"director\"],\n  juniorKeywords: [\"junior\", \"entry level\", \"associate\", \"intern\", \"graduate\"],\n  contractIncludeThreshold: 60,\n  fteIncludeThreshold: 40,\n};\n\nfunction containsAny(text, keywords) {\n  if (!text) return false;\n  const lower = text.toLowerCase();\n  return keywords.some(k => lower.includes(k));\n}\n\nfunction scoreJob(job) {\n  let score = 50;\n  let flaggedContract = false;\n  const titleAndDesc = `${job.title || \"\"} ${job.description || \"\"}`;\n  const companyName = job.company || \"\";\n\n  const salMin = job.salary_min || 0;\n  const salMax = job.salary_max || 0;\n  const salRef = salMax || salMin;\n\n  if (salRef > 0 && salRef < FILTERS.minSalary) return { score: 0, flaggedContract: false, include: false, excludeReason: \"salary_too_low\" };\n  if (salRef >= FILTERS.targetSalary) score += 10;\n  else if (salRef >= FILTERS.minSalary) score += 5;\n\n  const isFTE = job.employment_type === \"fulltime\" || containsAny(titleAndDesc, FILTERS.fteKeywords);\n  if (isFTE) score += 20;\n\n  const isContractTitle = containsAny(titleAndDesc, FILTERS.contractKeywords);\n  const isAgency = containsAny(companyName, FILTERS.agencyKeywords);\n  if (isContractTitle || isAgency) {\n    score -= (isContractTitle ? 30 : 0) + (isAgency ? 20 : 0);\n    flaggedContract = true;\n  }\n\n  if (containsAny(job.title, FILTERS.seniorKeywords)) score += 15;\n  if (containsAny(job.title, FILTERS.juniorKeywords)) score -= 20;\n  if (containsAny(titleAndDesc, [\"equity\", \"rsu\", \"stock options\", \"espp\"])) score += 10;\n\n  const threshold = flaggedContract ? FILTERS.contractIncludeThreshold : FILTERS.fteIncludeThreshold;\n  const include = score >= threshold;\n  return { score, flaggedContract, include, excludeReason: include ? null : \"score_below_threshold\" };\n}\n\nconst output = [];\nfor (const item of items) {\n  const job = item.json;\n  const result = scoreJob(job);\n  if (result.include) {\n    output.push({\n      json: {\n        ...job,\n        score: result.score,\n        flagged_contract: result.flaggedContract,\n      }\n    });\n  }\n}\nreturn output;"
+        "jsCode": "// Job scoring logic\nconst FILTERS = {\n  minSalary: 170000,\n  targetSalary: 200000,\n  contractKeywords: [\"contract\", \"c2c\", \"corp-to-corp\", \"1099\", \"w2 only\", \"w2 contract\", \"6-month\", \"12-month\", \"temp\"],\n  agencyKeywords: [\"staffing\", \"recruiting\", \"talent\", \"solutions llc\", \"consulting group\", \"resources inc\", \"workforce\"],\n  fteKeywords: [\"full-time\", \"full time\", \"permanent\", \"fte\", \"direct hire\"],\n  seniorKeywords: [\"staff \", \"principal\", \"senior\", \"sr.\", \"lead\", \"head of\", \"director\"],\n  juniorKeywords: [\"junior\", \"entry level\", \"associate\", \"intern\", \"graduate\"],\n  contractIncludeThreshold: 60,\n  fteIncludeThreshold: 40\n};\n\nfunction containsAny(text, keywords) {\n  if (!text) return false;\n  const lower = text.toLowerCase();\n  return keywords.some(k => lower.includes(k));\n}\n\nfunction scoreJob(job) {\n  let score = 50;\n  let flaggedContract = false;\n  const titleAndDesc = `${job.title || \"\"} ${job.description || \"\"}`;\n  const companyName = job.company || \"\";\n  const salMin = job.salary_min || 0;\n  const salMax = job.salary_max || 0;\n  const salRef = salMax || salMin;\n\n  if (salRef > 0 && salRef < FILTERS.minSalary) return { score: 0, flaggedContract: false, include: false };\n  if (salRef >= FILTERS.targetSalary) score += 10;\n  else if (salRef >= FILTERS.minSalary) score += 5;\n\n  const isFTE = job.employment_type === \"fulltime\" || containsAny(titleAndDesc, FILTERS.fteKeywords);\n  if (isFTE) score += 20;\n\n  const isContractTitle = containsAny(titleAndDesc, FILTERS.contractKeywords);\n  const isAgency = containsAny(companyName, FILTERS.agencyKeywords);\n  if (isContractTitle || isAgency) {\n    score -= (isContractTitle ? 30 : 0) + (isAgency ? 20 : 0);\n    flaggedContract = true;\n  }\n\n  if (containsAny(job.title, FILTERS.seniorKeywords)) score += 15;\n  if (containsAny(job.title, FILTERS.juniorKeywords)) score -= 20;\n  if (containsAny(titleAndDesc, [\"equity\", \"rsu\", \"stock options\", \"espp\"])) score += 10;\n\n  const threshold = flaggedContract ? FILTERS.contractIncludeThreshold : FILTERS.fteIncludeThreshold;\n  return { score, flaggedContract, include: score >= threshold };\n}\n\nconst output = [];\nfor (const item of items) {\n  const job = item.json;\n  const result = scoreJob(job);\n  if (result.include) {\n    output.push({ json: { ...job, score: result.score, flagged_contract: result.flaggedContract } });\n  }\n}\nreturn output;"
       },
       "id": "a1b2c3d4-0001-0001-0001-000000000017",
       "name": "Score Jobs",
@@ -134,7 +135,7 @@
     },
     {
       "parameters": {
-        "jsCode": "// Discord formatter\nconst WEBHOOK_BATCH_SIZE = 10;\n\nfunction formatSalary(min, max) {\n  if (!min && !max) return \"Salary not listed\";\n  const fmt = (n) => `$${Math.round(n / 1000)}k`;\n  if (min && max && min !== max) return `${fmt(min)}\\u2013${fmt(max)}`;\n  return fmt(min || max);\n}\n\nfunction jobEmbed(job) {\n  const fte = job.flagged_contract;\n  const emoji = fte ? \"\\uD83D\\uDFE1\" : \"\\uD83D\\uDFE2\";\n  const tag = fte ? \"[CONTRACT \\u26A0\\uFE0F]\" : \"[FTE]\";\n  const sourceLabel = (job.source || \"unknown\").toUpperCase();\n  const salary = formatSalary(job.salary_min, job.salary_max);\n  const location = job.location || \"Location not listed\";\n  return {\n    title: `${emoji} ${tag} ${job.title} \\u2014 ${job.company || \"Unknown Company\"}`,\n    url: job.url || \"\",\n    color: fte ? 0xFFA500 : 0x00C853,\n    fields: [\n      { name: \"\\uD83D\\uDCCD Location\", value: location, inline: true },\n      { name: \"\\uD83D\\uDCB0 Salary\", value: salary, inline: true },\n      { name: \"\\uD83D\\uDD17 Source\", value: sourceLabel, inline: true },\n      { name: \"\\u2B50 Score\", value: String(job.score), inline: true }\n    ],\n    footer: { text: fte ? \"Flagged: contract/C2C \\u2014 included on merit\" : \"FTE\" }\n  };\n}\n\nconst allJobs = items[0].json.data || items.map(i => i.json);\n\nconst batches = [];\nfor (let i = 0; i < allJobs.length; i += WEBHOOK_BATCH_SIZE) {\n  batches.push(allJobs.slice(i, i + WEBHOOK_BATCH_SIZE));\n}\n\nconst output = [];\nconst fteCount = allJobs.filter(j => !j.flagged_contract).length;\nconst contractCount = allJobs.filter(j => j.flagged_contract).length;\noutput.push({\n  json: {\n    content: `\\uD83D\\uDCCB **Daily Job Digest** \\u2014 ${allJobs.length} new jobs (${fteCount} FTE, ${contractCount} contract)`,\n    embeds: []\n  }\n});\n\nfor (const batch of batches) {\n  output.push({\n    json: {\n      content: \"\",\n      embeds: batch.map(job => jobEmbed(job))\n    }\n  });\n}\nreturn output;"
+        "jsCode": "// Discord formatter\nconst WEBHOOK_BATCH_SIZE = 10;\n\nfunction formatSalary(min, max) {\n  if (!min && !max) return \"Salary not listed\";\n  const fmt = (n) => `$${Math.round(n / 1000)}k`;\n  if (min && max && min !== max) return `${fmt(min)}\\u2013${fmt(max)}`;\n  return fmt(min || max);\n}\n\nfunction jobEmbed(job) {\n  const isContract = job.flagged_contract;\n  const emoji = isContract ? \"\\uD83D\\uDFE1\" : \"\\uD83D\\uDFE2\";\n  const tag = isContract ? \"[CONTRACT \\u26A0\\uFE0F]\" : \"[FTE]\";\n  return {\n    title: `${emoji} ${tag} ${job.title} \\u2014 ${job.company || \"Unknown Company\"}`,\n    url: job.url || \"\",\n    color: isContract ? 0xFFA500 : 0x00C853,\n    fields: [\n      { name: \"\\uD83D\\uDCCD Location\", value: job.location || \"Not listed\", inline: true },\n      { name: \"\\uD83D\\uDCB0 Salary\", value: formatSalary(job.salary_min, job.salary_max), inline: true },\n      { name: \"\\uD83D\\uDD17 Source\", value: (job.source || \"unknown\").toUpperCase(), inline: true },\n      { name: \"\\u2B50 Score\", value: String(job.score), inline: true }\n    ],\n    footer: { text: isContract ? \"Flagged: contract/C2C \\u2014 included on merit\" : \"FTE\" }\n  };\n}\n\nconst allJobs = items[0].json.data || items.map(i => i.json);\nconst fteCount = allJobs.filter(j => !j.flagged_contract).length;\nconst contractCount = allJobs.filter(j => j.flagged_contract).length;\n\nconst output = [{\n  json: {\n    content: `\\uD83D\\uDCCB **Daily Job Digest** \\u2014 ${allJobs.length} new jobs (${fteCount} FTE, ${contractCount} contract)`,\n    embeds: []\n  }\n}];\n\nfor (let i = 0; i < allJobs.length; i += WEBHOOK_BATCH_SIZE) {\n  output.push({\n    json: {\n      content: \"\",\n      embeds: allJobs.slice(i, i + WEBHOOK_BATCH_SIZE).map(jobEmbed)\n    }\n  });\n}\nreturn output;"
       },
       "id": "a1b2c3d4-0001-0001-0001-000000000019",
       "name": "Discord Format",
@@ -145,7 +146,7 @@
     {
       "parameters": {
         "method": "POST",
-        "url": "={{ $credentials.url }}",
+        "url": "https://discord.com/api/webhooks/REPLACE_WITH_YOUR_WEBHOOK_URL",
         "sendHeaders": true,
         "headerParameters": {
           "parameters": [
@@ -153,8 +154,9 @@
           ]
         },
         "sendBody": true,
-        "specifyBody": "json",
-        "jsonBody": "={{ JSON.stringify($json) }}",
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ JSON.stringify($json) }}",
         "options": {
           "batching": {
             "batch": {
@@ -173,49 +175,31 @@
   ],
   "connections": {
     "Schedule Trigger": {
-      "main": [
-        [{ "node": "Load Searches", "type": "main", "index": 0 }]
-      ]
+      "main": [[{ "node": "Load Searches", "type": "main", "index": 0 }]]
     },
     "Load Searches": {
-      "main": [
-        [{ "node": "JobSpy API Request", "type": "main", "index": 0 }]
-      ]
+      "main": [[{ "node": "JobSpy API Request", "type": "main", "index": 0 }]]
     },
     "JobSpy API Request": {
-      "main": [
-        [{ "node": "Normalise", "type": "main", "index": 0 }]
-      ]
+      "main": [[{ "node": "Normalise", "type": "main", "index": 0 }]]
     },
     "Normalise": {
-      "main": [
-        [{ "node": "Postgres Upsert", "type": "main", "index": 0 }]
-      ]
+      "main": [[{ "node": "Postgres Upsert", "type": "main", "index": 0 }]]
     },
     "Postgres Upsert": {
-      "main": [
-        [{ "node": "New Jobs Only", "type": "main", "index": 0 }]
-      ]
+      "main": [[{ "node": "New Jobs Only", "type": "main", "index": 0 }]]
     },
     "New Jobs Only": {
-      "main": [
-        [{ "node": "Score Jobs", "type": "main", "index": 0 }]
-      ]
+      "main": [[{ "node": "Score Jobs", "type": "main", "index": 0 }]]
     },
     "Score Jobs": {
-      "main": [
-        [{ "node": "Aggregate All Jobs", "type": "main", "index": 0 }]
-      ]
+      "main": [[{ "node": "Aggregate All Jobs", "type": "main", "index": 0 }]]
     },
     "Aggregate All Jobs": {
-      "main": [
-        [{ "node": "Discord Format", "type": "main", "index": 0 }]
-      ]
+      "main": [[{ "node": "Discord Format", "type": "main", "index": 0 }]]
     },
     "Discord Format": {
-      "main": [
-        [{ "node": "Discord Webhook", "type": "main", "index": 0 }]
-      ]
+      "main": [[{ "node": "Discord Webhook", "type": "main", "index": 0 }]]
     }
   },
   "settings": {
