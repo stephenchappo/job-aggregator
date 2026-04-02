@@ -21,7 +21,7 @@
     },
     {
       "parameters": {
-        "jsCode": "// Inline searches config — mirrors config/searches.json\nconst config = {\n  searches: [\n    { search_term: \"Site Reliability Engineer\", location: \"San Jose, CA\", distance: 50, job_type: \"fulltime\", is_remote: true, results_wanted: 50 },\n    { search_term: \"SRE\", location: \"San Francisco, CA\", distance: 50, job_type: \"fulltime\", is_remote: true, results_wanted: 50 },\n    { search_term: \"Staff SRE\", location: \"United States\", distance: null, job_type: \"fulltime\", is_remote: true, results_wanted: 30 },\n    { search_term: \"Principal SRE\", location: \"United States\", distance: null, job_type: \"fulltime\", is_remote: true, results_wanted: 30 },\n    { search_term: \"DevOps Engineer\", location: \"San Jose, CA\", distance: 50, job_type: \"fulltime\", is_remote: true, results_wanted: 50 },\n    { search_term: \"Platform Engineer\", location: \"San Jose, CA\", distance: 50, job_type: \"fulltime\", is_remote: true, results_wanted: 50 },\n    { search_term: \"Infrastructure Engineer\", location: \"San Jose, CA\", distance: 50, job_type: \"fulltime\", is_remote: true, results_wanted: 30 }\n  ],\n  sources: [\"indeed\", \"linkedin\", \"dice\", \"zip_recruiter\"],\n  country_indeed: \"USA\"\n};\n\nreturn config.searches.map(s => ({\n  json: {\n    ...s,\n    site_name: config.sources,\n    country_indeed: config.country_indeed\n  }\n}));"
+        "jsCode": "// Inline searches config — mirrors config/searches.json\n// Outputs body as a pre-built JSON string so HTTP node preserves int/bool types\nconst searches = [\n  { search_term: \"Site Reliability Engineer\", location: \"San Jose, CA\", distance: 50, job_type: \"fulltime\", is_remote: true, results_wanted: 50 },\n  { search_term: \"SRE\", location: \"San Francisco, CA\", distance: 50, job_type: \"fulltime\", is_remote: true, results_wanted: 50 },\n  { search_term: \"Staff SRE\", location: \"United States\", distance: null, job_type: \"fulltime\", is_remote: true, results_wanted: 30 },\n  { search_term: \"Principal SRE\", location: \"United States\", distance: null, job_type: \"fulltime\", is_remote: true, results_wanted: 30 },\n  { search_term: \"DevOps Engineer\", location: \"San Jose, CA\", distance: 50, job_type: \"fulltime\", is_remote: true, results_wanted: 50 },\n  { search_term: \"Platform Engineer\", location: \"San Jose, CA\", distance: 50, job_type: \"fulltime\", is_remote: true, results_wanted: 50 },\n  { search_term: \"Infrastructure Engineer\", location: \"San Jose, CA\", distance: 50, job_type: \"fulltime\", is_remote: true, results_wanted: 30 }\n];\n\nreturn searches.map(s => ({\n  json: {\n    body: JSON.stringify({\n      search_term: s.search_term,\n      location: s.location,\n      ...(s.distance !== null ? { distance: s.distance } : {}),\n      job_type: s.job_type,\n      is_remote: s.is_remote,\n      results_wanted: s.results_wanted,\n      site_name: [\"indeed\", \"linkedin\", \"dice\", \"zip_recruiter\"],\n      country_indeed: \"USA\"\n    })\n  }\n}));"
       },
       "id": "a1b2c3d4-0001-0001-0001-000000000012",
       "name": "Load Searches",
@@ -43,18 +43,8 @@
           ]
         },
         "sendBody": true,
-        "bodyParameters": {
-          "parameters": [
-            { "name": "search_term", "value": "={{ $json.search_term }}" },
-            { "name": "location", "value": "={{ $json.location }}" },
-            { "name": "distance", "value": "={{ $json.distance }}" },
-            { "name": "job_type", "value": "={{ $json.job_type }}" },
-            { "name": "is_remote", "value": "={{ $json.is_remote }}" },
-            { "name": "results_wanted", "value": "={{ $json.results_wanted }}" },
-            { "name": "site_name", "value": "={{ $json.site_name }}" },
-            { "name": "country_indeed", "value": "USA" }
-          ]
-        },
+        "specifyBody": "json",
+        "jsonBody": "={{ $json.body }}",
         "options": {
           "timeout": 60000
         }
