@@ -1,0 +1,251 @@
+{
+  "name": "JobSpy Daily Scrape",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 7 * * *"
+            }
+          ]
+        }
+      },
+      "id": "schedule-trigger",
+      "name": "Schedule Trigger",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.1,
+      "position": [240, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Inline searches config — mirrors config/searches.json\nconst config = {\n  searches: [\n    { search_term: \"Site Reliability Engineer\", location: \"San Jose, CA\", distance: 50, job_type: \"fulltime\", is_remote: true, results_wanted: 50, hours_old: 24 },\n    { search_term: \"SRE\", location: \"San Francisco, CA\", distance: 50, job_type: \"fulltime\", is_remote: true, results_wanted: 50, hours_old: 24 },\n    { search_term: \"Staff SRE\", location: \"United States\", distance: null, job_type: \"fulltime\", is_remote: true, results_wanted: 30, hours_old: 24 },\n    { search_term: \"Principal SRE\", location: \"United States\", distance: null, job_type: \"fulltime\", is_remote: true, results_wanted: 30, hours_old: 24 },\n    { search_term: \"DevOps Engineer\", location: \"San Jose, CA\", distance: 50, job_type: \"fulltime\", is_remote: true, results_wanted: 50, hours_old: 24 },\n    { search_term: \"Platform Engineer\", location: \"San Jose, CA\", distance: 50, job_type: \"fulltime\", is_remote: true, results_wanted: 50, hours_old: 24 },\n    { search_term: \"Infrastructure Engineer\", location: \"San Jose, CA\", distance: 50, job_type: \"fulltime\", is_remote: true, results_wanted: 30, hours_old: 24 }\n  ],\n  sources: [\"indeed\", \"linkedin\", \"dice\", \"zip_recruiter\"],\n  country_indeed: \"USA\"\n};\n\nreturn config.searches.map(s => ({\n  json: {\n    ...s,\n    site_name: config.sources,\n    country_indeed: config.country_indeed\n  }\n}));"
+      },
+      "id": "load-searches",
+      "name": "Load Searches",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [460, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://192.168.1.151:8088/api/v1/jobs/search",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            { "name": "search_term", "value": "={{ $json.search_term }}" },
+            { "name": "location", "value": "={{ $json.location }}" },
+            { "name": "distance", "value": "={{ $json.distance }}" },
+            { "name": "job_type", "value": "={{ $json.job_type }}" },
+            { "name": "is_remote", "value": "={{ $json.is_remote }}" },
+            { "name": "results_wanted", "value": "={{ $json.results_wanted }}" },
+            { "name": "hours_old", "value": "={{ $json.hours_old }}" },
+            { "name": "site_name", "value": "={{ $json.site_name }}" },
+            { "name": "country_indeed", "value": "={{ $json.country_indeed }}" }
+          ]
+        },
+        "options": {
+          "batching": {
+            "batch": {
+              "batchSize": 1,
+              "batchInterval": 2000
+            }
+          },
+          "timeout": 60000
+        }
+      },
+      "id": "jobspy-request",
+      "name": "JobSpy API Request",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [680, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Normalisation — maps JobSpy API response fields to common schema\nconst crypto = require('crypto');\n\nfunction makeJobId(source, company, title, url) {\n  const raw = `${source}:${(company || \"\").toLowerCase()}:${(title || \"\").toLowerCase()}:${(url || \"\").slice(-40)}`;\n  return crypto.createHash('md5').update(raw).digest('hex');\n}\n\nfunction parseSalary(salaryStr) {\n  if (!salaryStr) return { min: null, max: null };\n  const str = salaryStr.replace(/,/g, '').toLowerCase();\n  const hourly = str.includes('/hr') || str.includes('per hour') || str.includes('hourly');\n  const nums = str.match(/\\d+\\.?\\d*/g);\n  if (!nums) return { min: null, max: null };\n  let vals = nums.map(Number);\n  if (hourly) vals = vals.map(v => v * 2080);\n  if (vals.some(v => v < 1000)) vals = vals.map(v => v * 1000);\n  return { min: vals[0] || null, max: vals[1] || vals[0] || null };\n}\n\nconst output = [];\nfor (const item of items) {\n  const raw = item.json;\n  const jobs = Array.isArray(raw.jobs) ? raw.jobs : [raw];\n  for (const job of jobs) {\n    const source = (job.site || job.source || \"unknown\").toLowerCase();\n    const salary = parseSalary(job.salary || job.salary_range || job.min_amount_str);\n    const salMin = job.min_amount ? Math.round(job.min_amount) : salary.min;\n    const salMax = job.max_amount ? Math.round(job.max_amount) : salary.max;\n    output.push({\n      json: {\n        job_id: makeJobId(source, job.company, job.title, job.job_url || job.url),\n        source: source,\n        title: job.title || null,\n        company: job.company || null,\n        location: job.location || null,\n        url: job.job_url || job.url || null,\n        salary_min: salMin,\n        salary_max: salMax,\n        employment_type: job.job_type || job.employment_type || \"unknown\",\n        description: job.description || null,\n        posted_at: job.date_posted || job.posted_at || null,\n        raw_json: job\n      }\n    });\n  }\n}\nreturn output;"
+      },
+      "id": "normalise",
+      "name": "Normalise",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [900, 300]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO jobs (job_id, source, title, company, location, url, salary_min, salary_max, employment_type, posted_at, raw_json)\nVALUES (\n  '{{ $json.job_id }}',\n  '{{ $json.source }}',\n  '{{ $json.title }}',\n  {{ $json.company ? `'${$json.company.replace(/'/g, \"''\")}'` : 'NULL' }},\n  {{ $json.location ? `'${$json.location.replace(/'/g, \"''\")}'` : 'NULL' }},\n  {{ $json.url ? `'${$json.url.replace(/'/g, \"''\")}'` : 'NULL' }},\n  {{ $json.salary_min ?? 'NULL' }},\n  {{ $json.salary_max ?? 'NULL' }},\n  '{{ $json.employment_type || \"unknown\" }}',\n  {{ $json.posted_at ? `'${$json.posted_at}'` : 'NULL' }},\n  '{{ JSON.stringify($json.raw_json).replace(/'/g, \"''\") }}'\n)\nON CONFLICT (job_id) DO UPDATE SET last_seen = NOW()\nRETURNING *, (xmax = 0) AS is_new;",
+        "options": {}
+      },
+      "id": "postgres-upsert",
+      "name": "Postgres Upsert",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [1120, 300],
+      "credentials": {
+        "postgres": {
+          "name": "JobSpy Postgres"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "is-new-condition",
+              "leftValue": "={{ $json.is_new }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "filter-new",
+      "name": "New Jobs Only",
+      "type": "n8n-nodes-base.filter",
+      "typeVersion": 2,
+      "position": [1340, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Job scoring logic\nconst FILTERS = {\n  minSalary: 170000,\n  targetSalary: 200000,\n  contractKeywords: [\"contract\", \"c2c\", \"corp-to-corp\", \"1099\", \"w2 only\", \"w2 contract\", \"6-month\", \"12-month\", \"temp\"],\n  agencyKeywords: [\"staffing\", \"recruiting\", \"talent\", \"solutions llc\", \"consulting group\", \"resources inc\", \"workforce\"],\n  fteKeywords: [\"full-time\", \"full time\", \"permanent\", \"fte\", \"direct hire\"],\n  seniorKeywords: [\"staff \", \"principal\", \"senior\", \"sr.\", \"lead\", \"head of\", \"director\"],\n  juniorKeywords: [\"junior\", \"entry level\", \"associate\", \"intern\", \"graduate\"],\n  contractIncludeThreshold: 60,\n  fteIncludeThreshold: 40,\n};\n\nfunction containsAny(text, keywords) {\n  if (!text) return false;\n  const lower = text.toLowerCase();\n  return keywords.some(k => lower.includes(k));\n}\n\nfunction scoreJob(job) {\n  let score = 50;\n  let flaggedContract = false;\n  const titleAndDesc = `${job.title || \"\"} ${job.description || \"\"}`;\n  const companyName = job.company || \"\";\n\n  const salMin = job.salary_min || 0;\n  const salMax = job.salary_max || 0;\n  const salRef = salMax || salMin;\n\n  if (salRef > 0 && salRef < FILTERS.minSalary) return { score: 0, flaggedContract: false, include: false, excludeReason: \"salary_too_low\" };\n  if (salRef >= FILTERS.targetSalary) score += 10;\n  else if (salRef >= FILTERS.minSalary) score += 5;\n\n  const isFTE = job.employment_type === \"fulltime\" || containsAny(titleAndDesc, FILTERS.fteKeywords);\n  if (isFTE) score += 20;\n\n  const isContractTitle = containsAny(titleAndDesc, FILTERS.contractKeywords);\n  const isAgency = containsAny(companyName, FILTERS.agencyKeywords);\n  if (isContractTitle || isAgency) {\n    score -= (isContractTitle ? 30 : 0) + (isAgency ? 20 : 0);\n    flaggedContract = true;\n  }\n\n  if (containsAny(job.title, FILTERS.seniorKeywords)) score += 15;\n  if (containsAny(job.title, FILTERS.juniorKeywords)) score -= 20;\n  if (containsAny(titleAndDesc, [\"equity\", \"rsu\", \"stock options\", \"espp\"])) score += 10;\n\n  const threshold = flaggedContract ? FILTERS.contractIncludeThreshold : FILTERS.fteIncludeThreshold;\n  const include = score >= threshold;\n  return { score, flaggedContract, include, excludeReason: include ? null : \"score_below_threshold\" };\n}\n\nconst output = [];\nfor (const item of items) {\n  const job = item.json;\n  const result = scoreJob(job);\n  if (result.include) {\n    output.push({\n      json: {\n        ...job,\n        score: result.score,\n        flagged_contract: result.flaggedContract,\n      }\n    });\n  }\n}\nreturn output;"
+      },
+      "id": "score",
+      "name": "Score Jobs",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1560, 300]
+    },
+    {
+      "parameters": {
+        "aggregate": "aggregateAllItemData",
+        "options": {}
+      },
+      "id": "aggregate",
+      "name": "Aggregate All Jobs",
+      "type": "n8n-nodes-base.aggregate",
+      "typeVersion": 1,
+      "position": [1780, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Discord formatter\nconst WEBHOOK_BATCH_SIZE = 10;\n\nfunction formatSalary(min, max) {\n  if (!min && !max) return \"Salary not listed\";\n  const fmt = (n) => `$${Math.round(n / 1000)}k`;\n  if (min && max && min !== max) return `${fmt(min)}\\u2013${fmt(max)}`;\n  return fmt(min || max);\n}\n\nfunction jobEmbed(job) {\n  const fte = job.flagged_contract;\n  const emoji = fte ? \"\\uD83D\\uDFE1\" : \"\\uD83D\\uDFE2\";\n  const tag = fte ? \"[CONTRACT \\u26A0\\uFE0F]\" : \"[FTE]\";\n  const sourceLabel = (job.source || \"unknown\").toUpperCase();\n  const salary = formatSalary(job.salary_min, job.salary_max);\n  const location = job.location || \"Location not listed\";\n  return {\n    title: `${emoji} ${tag} ${job.title} \\u2014 ${job.company || \"Unknown Company\"}`,\n    url: job.url || \"\",\n    color: fte ? 0xFFA500 : 0x00C853,\n    fields: [\n      { name: \"\\uD83D\\uDCCD Location\", value: location, inline: true },\n      { name: \"\\uD83D\\uDCB0 Salary\", value: salary, inline: true },\n      { name: \"\\uD83D\\uDD17 Source\", value: sourceLabel, inline: true },\n      { name: \"\\u2B50 Score\", value: String(job.score), inline: true },\n    ],\n    footer: { text: fte ? \"Flagged: contract/C2C \\u2014 included on merit\" : \"FTE\" },\n  };\n}\n\n// items[0].json.data is the aggregated array from Aggregate node\nconst allJobs = items[0].json.data || items.map(i => i.json);\n\nconst batches = [];\nfor (let i = 0; i < allJobs.length; i += WEBHOOK_BATCH_SIZE) {\n  batches.push(allJobs.slice(i, i + WEBHOOK_BATCH_SIZE));\n}\n\nconst output = [];\nconst fteCount = allJobs.filter(j => !j.flagged_contract).length;\nconst contractCount = allJobs.filter(j => j.flagged_contract).length;\noutput.push({\n  json: {\n    content: `\\uD83D\\uDCCB **Daily Job Digest** \\u2014 ${allJobs.length} new jobs (${fteCount} FTE, ${contractCount} contract)`,\n    embeds: []\n  }\n});\n\nfor (const batch of batches) {\n  output.push({\n    json: {\n      content: \"\",\n      embeds: batch.map(job => jobEmbed(job))\n    }\n  });\n}\nreturn output;"
+      },
+      "id": "discord-format",
+      "name": "Discord Format",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [2000, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $credentials.webhookUrl }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Content-Type", "value": "application/json" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json) }}",
+        "options": {
+          "batching": {
+            "batch": {
+              "batchSize": 1,
+              "batchInterval": 1000
+            }
+          }
+        }
+      },
+      "id": "discord-webhook",
+      "name": "Discord Webhook",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [2220, 300],
+      "credentials": {
+        "httpCustomAuth": {
+          "name": "Discord Job Alerts Webhook"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Schedule Trigger": {
+      "main": [
+        [{ "node": "Load Searches", "type": "main", "index": 0 }]
+      ]
+    },
+    "Load Searches": {
+      "main": [
+        [{ "node": "JobSpy API Request", "type": "main", "index": 0 }]
+      ]
+    },
+    "JobSpy API Request": {
+      "main": [
+        [{ "node": "Normalise", "type": "main", "index": 0 }]
+      ]
+    },
+    "Normalise": {
+      "main": [
+        [{ "node": "Postgres Upsert", "type": "main", "index": 0 }]
+      ]
+    },
+    "Postgres Upsert": {
+      "main": [
+        [{ "node": "New Jobs Only", "type": "main", "index": 0 }]
+      ]
+    },
+    "New Jobs Only": {
+      "main": [
+        [{ "node": "Score Jobs", "type": "main", "index": 0 }]
+      ]
+    },
+    "Score Jobs": {
+      "main": [
+        [{ "node": "Aggregate All Jobs", "type": "main", "index": 0 }]
+      ]
+    },
+    "Aggregate All Jobs": {
+      "main": [
+        [{ "node": "Discord Format", "type": "main", "index": 0 }]
+      ]
+    },
+    "Discord Format": {
+      "main": [
+        [{ "node": "Discord Webhook", "type": "main", "index": 0 }]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "saveManualExecutions": true,
+    "callerPolicy": "workflowsFromSameOwner",
+    "errorWorkflow": ""
+  },
+  "staticData": null,
+  "tags": ["job-aggregator"],
+  "pinData": {}
+}

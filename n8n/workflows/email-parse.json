@@ -1,0 +1,235 @@
+{
+  "name": "Job Email Parse",
+  "nodes": [
+    {
+      "parameters": {
+        "pollTimes": {
+          "item": [
+            {
+              "mode": "everyHour"
+            }
+          ]
+        },
+        "filters": {
+          "q": "from:(builtin.com OR wellfound.com OR linkedin.com) subject:(job)",
+          "readStatus": "unread"
+        },
+        "options": {
+          "downloadAttachments": false,
+          "dataPropertyAttachmentsPrefixName": "attachment_",
+          "format": "resolved"
+        }
+      },
+      "id": "gmail-trigger",
+      "name": "Gmail Trigger",
+      "type": "n8n-nodes-base.gmailTrigger",
+      "typeVersion": 1,
+      "position": [240, 300],
+      "credentials": {
+        "gmailOAuth2": {
+          "name": "Gmail"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Email parser — maps Built In / Wellfound / LinkedIn alert emails to job objects\nconst source_map = {\n  'builtin.com': 'builtin',\n  'wellfound.com': 'wellfound',\n  'linkedin.com': 'linkedin',\n};\n\nfunction detectSource(from, subject) {\n  const combined = `${from} ${subject}`.toLowerCase();\n  for (const [domain, source] of Object.entries(source_map)) {\n    if (combined.includes(domain)) return source;\n  }\n  return 'email_unknown';\n}\n\nfunction extractLinksAndText(html) {\n  const results = [];\n  const linkRe = /<a[^>]+href=[\"']([^\"']+)[\"'][^>]*>([\\s\\S]*?)<\\/a>/gi;\n  let m;\n  while ((m = linkRe.exec(html)) !== null) {\n    results.push({ href: m[1], text: m[2].replace(/<[^>]+>/g, '').trim() });\n  }\n  return results;\n}\n\nfunction parseBuiltIn(html) {\n  const jobs = [];\n  const links = extractLinksAndText(html);\n  for (const link of links) {\n    if (!link.href.includes('builtin.com/job') && !link.href.includes('builtin.com/jobs')) continue;\n    if (!link.text || link.text.length < 3) continue;\n    jobs.push({ source: 'builtin', title: link.text, company: null, location: null, url: link.href.split('?')[0], salary_min: null, salary_max: null, employment_type: 'unknown', description: null, posted_at: null });\n  }\n  return jobs;\n}\n\nfunction parseWellfound(html) {\n  const jobs = [];\n  const links = extractLinksAndText(html);\n  for (const link of links) {\n    if (!link.href.includes('wellfound.com/jobs') && !link.href.includes('angel.co/job')) continue;\n    if (!link.text || link.text.length < 3) continue;\n    jobs.push({ source: 'wellfound', title: link.text, company: null, location: null, url: link.href.split('?')[0], salary_min: null, salary_max: null, employment_type: 'unknown', description: null, posted_at: null });\n  }\n  return jobs;\n}\n\nfunction parseLinkedIn(html) {\n  const jobs = [];\n  const links = extractLinksAndText(html);\n  for (const link of links) {\n    if (!link.href.includes('linkedin.com/jobs/view') && !link.href.includes('linkedin.com/comm/jobs')) continue;\n    if (!link.text || link.text.length < 3) continue;\n    jobs.push({ source: 'linkedin', title: link.text, company: null, location: null, url: link.href.split('?')[0], salary_min: null, salary_max: null, employment_type: 'unknown', description: null, posted_at: null });\n  }\n  return jobs;\n}\n\nconst crypto = require('crypto');\nfunction makeJobId(source, title, url) {\n  const raw = `${source}:${(title || \"\").toLowerCase()}:${(url || \"\").slice(-40)}`;\n  return crypto.createHash('md5').update(raw).digest('hex');\n}\n\nconst output = [];\nfor (const item of items) {\n  const email = item.json;\n  const html = email.body || email.html || email.snippet || \"\";\n  const from = email.from || \"\";\n  const subject = email.subject || \"\";\n  const source = detectSource(from, subject);\n\n  let rawJobs = [];\n  if (source === 'builtin') rawJobs = parseBuiltIn(html);\n  else if (source === 'wellfound') rawJobs = parseWellfound(html);\n  else if (source === 'linkedin') rawJobs = parseLinkedIn(html);\n\n  const parsed = rawJobs.map(job => ({\n    json: {\n      ...job,\n      job_id: makeJobId(job.source, job.title, job.url),\n      raw_json: { email_subject: subject, email_from: from },\n    }\n  }));\n\n  if (parsed.length > 0) output.push(...parsed);\n}\n\nreturn output.length > 0 ? output : [{ json: { _skip: true } }];"
+      },
+      "id": "email-parse",
+      "name": "Parse Email",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [460, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "skip-condition",
+              "leftValue": "={{ $json._skip }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "notEquals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "filter-skip",
+      "name": "Skip Empty",
+      "type": "n8n-nodes-base.filter",
+      "typeVersion": 2,
+      "position": [680, 300]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO jobs (job_id, source, title, company, location, url, salary_min, salary_max, employment_type, posted_at, raw_json)\nVALUES (\n  '{{ $json.job_id }}',\n  '{{ $json.source }}',\n  '{{ $json.title }}',\n  {{ $json.company ? `'${$json.company.replace(/'/g, \"''\")}'` : 'NULL' }},\n  {{ $json.location ? `'${$json.location.replace(/'/g, \"''\")}'` : 'NULL' }},\n  {{ $json.url ? `'${$json.url.replace(/'/g, \"''\")}'` : 'NULL' }},\n  {{ $json.salary_min ?? 'NULL' }},\n  {{ $json.salary_max ?? 'NULL' }},\n  '{{ $json.employment_type || \"unknown\" }}',\n  {{ $json.posted_at ? `'${$json.posted_at}'` : 'NULL' }},\n  '{{ JSON.stringify($json.raw_json).replace(/'/g, \"''\") }}'\n)\nON CONFLICT (job_id) DO UPDATE SET last_seen = NOW()\nRETURNING *, (xmax = 0) AS is_new;",
+        "options": {}
+      },
+      "id": "postgres-upsert",
+      "name": "Postgres Upsert",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [900, 300],
+      "credentials": {
+        "postgres": {
+          "name": "JobSpy Postgres"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict"
+          },
+          "conditions": [
+            {
+              "id": "is-new-condition",
+              "leftValue": "={{ $json.is_new }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "filter-new",
+      "name": "New Jobs Only",
+      "type": "n8n-nodes-base.filter",
+      "typeVersion": 2,
+      "position": [1120, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Job scoring logic\nconst FILTERS = {\n  minSalary: 170000,\n  targetSalary: 200000,\n  contractKeywords: [\"contract\", \"c2c\", \"corp-to-corp\", \"1099\", \"w2 only\", \"w2 contract\", \"6-month\", \"12-month\", \"temp\"],\n  agencyKeywords: [\"staffing\", \"recruiting\", \"talent\", \"solutions llc\", \"consulting group\", \"resources inc\", \"workforce\"],\n  fteKeywords: [\"full-time\", \"full time\", \"permanent\", \"fte\", \"direct hire\"],\n  seniorKeywords: [\"staff \", \"principal\", \"senior\", \"sr.\", \"lead\", \"head of\", \"director\"],\n  juniorKeywords: [\"junior\", \"entry level\", \"associate\", \"intern\", \"graduate\"],\n  contractIncludeThreshold: 60,\n  fteIncludeThreshold: 40,\n};\n\nfunction containsAny(text, keywords) {\n  if (!text) return false;\n  const lower = text.toLowerCase();\n  return keywords.some(k => lower.includes(k));\n}\n\nfunction scoreJob(job) {\n  let score = 50;\n  let flaggedContract = false;\n  const titleAndDesc = `${job.title || \"\"} ${job.description || \"\"}`;\n  const companyName = job.company || \"\";\n\n  const salMin = job.salary_min || 0;\n  const salMax = job.salary_max || 0;\n  const salRef = salMax || salMin;\n\n  if (salRef > 0 && salRef < FILTERS.minSalary) return { score: 0, flaggedContract: false, include: false, excludeReason: \"salary_too_low\" };\n  if (salRef >= FILTERS.targetSalary) score += 10;\n  else if (salRef >= FILTERS.minSalary) score += 5;\n\n  const isFTE = job.employment_type === \"fulltime\" || containsAny(titleAndDesc, FILTERS.fteKeywords);\n  if (isFTE) score += 20;\n\n  const isContractTitle = containsAny(titleAndDesc, FILTERS.contractKeywords);\n  const isAgency = containsAny(companyName, FILTERS.agencyKeywords);\n  if (isContractTitle || isAgency) {\n    score -= (isContractTitle ? 30 : 0) + (isAgency ? 20 : 0);\n    flaggedContract = true;\n  }\n\n  if (containsAny(job.title, FILTERS.seniorKeywords)) score += 15;\n  if (containsAny(job.title, FILTERS.juniorKeywords)) score -= 20;\n  if (containsAny(titleAndDesc, [\"equity\", \"rsu\", \"stock options\", \"espp\"])) score += 10;\n\n  const threshold = flaggedContract ? FILTERS.contractIncludeThreshold : FILTERS.fteIncludeThreshold;\n  const include = score >= threshold;\n  return { score, flaggedContract, include, excludeReason: include ? null : \"score_below_threshold\" };\n}\n\nconst output = [];\nfor (const item of items) {\n  const job = item.json;\n  const result = scoreJob(job);\n  if (result.include) {\n    output.push({\n      json: {\n        ...job,\n        score: result.score,\n        flagged_contract: result.flaggedContract,\n      }\n    });\n  }\n}\nreturn output;"
+      },
+      "id": "score",
+      "name": "Score Jobs",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1340, 300]
+    },
+    {
+      "parameters": {
+        "aggregate": "aggregateAllItemData",
+        "options": {}
+      },
+      "id": "aggregate",
+      "name": "Aggregate All Jobs",
+      "type": "n8n-nodes-base.aggregate",
+      "typeVersion": 1,
+      "position": [1560, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Discord formatter\nconst WEBHOOK_BATCH_SIZE = 10;\n\nfunction formatSalary(min, max) {\n  if (!min && !max) return \"Salary not listed\";\n  const fmt = (n) => `$${Math.round(n / 1000)}k`;\n  if (min && max && min !== max) return `${fmt(min)}\\u2013${fmt(max)}`;\n  return fmt(min || max);\n}\n\nfunction jobEmbed(job) {\n  const fte = job.flagged_contract;\n  const emoji = fte ? \"\\uD83D\\uDFE1\" : \"\\uD83D\\uDFE2\";\n  const tag = fte ? \"[CONTRACT \\u26A0\\uFE0F]\" : \"[FTE]\";\n  const sourceLabel = (job.source || \"unknown\").toUpperCase();\n  const salary = formatSalary(job.salary_min, job.salary_max);\n  const location = job.location || \"Location not listed\";\n  return {\n    title: `${emoji} ${tag} ${job.title} \\u2014 ${job.company || \"Unknown Company\"}`,\n    url: job.url || \"\",\n    color: fte ? 0xFFA500 : 0x00C853,\n    fields: [\n      { name: \"\\uD83D\\uDCCD Location\", value: location, inline: true },\n      { name: \"\\uD83D\\uDCB0 Salary\", value: salary, inline: true },\n      { name: \"\\uD83D\\uDD17 Source\", value: sourceLabel, inline: true },\n      { name: \"\\u2B50 Score\", value: String(job.score), inline: true },\n    ],\n    footer: { text: fte ? \"Flagged: contract/C2C \\u2014 included on merit\" : \"FTE\" },\n  };\n}\n\nconst allJobs = items[0].json.data || items.map(i => i.json);\n\nconst batches = [];\nfor (let i = 0; i < allJobs.length; i += WEBHOOK_BATCH_SIZE) {\n  batches.push(allJobs.slice(i, i + WEBHOOK_BATCH_SIZE));\n}\n\nconst output = [];\nconst fteCount = allJobs.filter(j => !j.flagged_contract).length;\nconst contractCount = allJobs.filter(j => j.flagged_contract).length;\noutput.push({\n  json: {\n    content: `\\uD83D\\uDCCB **Daily Job Digest** \\u2014 ${allJobs.length} new jobs (${fteCount} FTE, ${contractCount} contract)`,\n    embeds: []\n  }\n});\n\nfor (const batch of batches) {\n  output.push({\n    json: {\n      content: \"\",\n      embeds: batch.map(job => jobEmbed(job))\n    }\n  });\n}\nreturn output;"
+      },
+      "id": "discord-format",
+      "name": "Discord Format",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1780, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $credentials.webhookUrl }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            { "name": "Content-Type", "value": "application/json" }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json) }}",
+        "options": {
+          "batching": {
+            "batch": {
+              "batchSize": 1,
+              "batchInterval": 1000
+            }
+          }
+        }
+      },
+      "id": "discord-webhook",
+      "name": "Discord Webhook",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [2000, 300],
+      "credentials": {
+        "httpCustomAuth": {
+          "name": "Discord Job Alerts Webhook"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Gmail Trigger": {
+      "main": [
+        [{ "node": "Parse Email", "type": "main", "index": 0 }]
+      ]
+    },
+    "Parse Email": {
+      "main": [
+        [{ "node": "Skip Empty", "type": "main", "index": 0 }]
+      ]
+    },
+    "Skip Empty": {
+      "main": [
+        [{ "node": "Postgres Upsert", "type": "main", "index": 0 }]
+      ]
+    },
+    "Postgres Upsert": {
+      "main": [
+        [{ "node": "New Jobs Only", "type": "main", "index": 0 }]
+      ]
+    },
+    "New Jobs Only": {
+      "main": [
+        [{ "node": "Score Jobs", "type": "main", "index": 0 }]
+      ]
+    },
+    "Score Jobs": {
+      "main": [
+        [{ "node": "Aggregate All Jobs", "type": "main", "index": 0 }]
+      ]
+    },
+    "Aggregate All Jobs": {
+      "main": [
+        [{ "node": "Discord Format", "type": "main", "index": 0 }]
+      ]
+    },
+    "Discord Format": {
+      "main": [
+        [{ "node": "Discord Webhook", "type": "main", "index": 0 }]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "saveManualExecutions": true,
+    "callerPolicy": "workflowsFromSameOwner",
+    "errorWorkflow": ""
+  },
+  "staticData": null,
+  "tags": ["job-aggregator"],
+  "pinData": {}
+}
