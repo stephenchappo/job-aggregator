@@ -1,5 +1,5 @@
 {
-  "updatedAt": "2026-04-02T23:15:00.089Z",
+  "updatedAt": "2026-04-02T23:26:18.435Z",
   "createdAt": "2026-04-02T01:04:05.704Z",
   "id": "nEoZoAorG3d5YtaI",
   "name": "JobSpy Daily Scrape",
@@ -158,7 +158,7 @@
     },
     {
       "parameters": {
-        "jsCode": "// Discord formatter \u2014 sorted descending by score, includes Ollama summary\nconst WEBHOOK_BATCH_SIZE = 10;\n\nfunction formatSalary(min, max) {\n  if (!min && !max) return 'Salary not listed';\n  const fmt = (n) => `$${Math.round(n / 1000)}k`;\n  if (min && max && min !== max) return `${fmt(min)}\\u2013${fmt(max)}`;\n  return fmt(min || max);\n}\n\nfunction jobEmbed(job) {\n  const isContract = job.flagged_contract;\n  const emoji = isContract ? '\\uD83D\\uDFE1' : '\\uD83D\\uDFE2';\n  const tag = isContract ? '[CONTRACT \\u26A0\\uFE0F]' : '[FTE]';\n  const fields = [\n    { name: '\\uD83D\\uDCCD Location', value: job.location || 'Not listed', inline: true },\n    { name: '\\uD83D\\uDCB0 Salary', value: formatSalary(job.salary_min, job.salary_max), inline: true },\n    { name: '\\uD83D\\uDD17 Source', value: (job.source || 'unknown').toUpperCase(), inline: true },\n    { name: '\\u2B50 Score', value: String(job.score), inline: true },\n  ];\n\n  if (job.ollama_summary) {\n    fields.push({ name: '\\uD83E\\uDD16 Summary', value: job.ollama_summary.slice(0, 1024), inline: false });\n  }\n\n  return {\n    title: `${emoji} ${tag} ${job.title} \\u2014 ${job.company || 'Unknown Company'}`,\n    url: job.url || '',\n    color: isContract ? 0xFFA500 : 0x00C853,\n    fields,\n    footer: { text: isContract ? 'Flagged: contract/C2C \\u2014 included on merit' : 'FTE' }\n  };\n}\n\nconst allJobs = (items[0].json.data || items.map(i => i.json))\n  .sort((a, b) => b.score - a.score);\n\nconst fteCount = allJobs.filter(j => !j.flagged_contract).length;\nconst contractCount = allJobs.filter(j => j.flagged_contract).length;\n\nconst output = [{\n  json: {\n    content: `\\uD83D\\uDCCB **Daily Job Digest** \\u2014 ${allJobs.length} new jobs (${fteCount} FTE, ${contractCount} contract)`,\n    embeds: []\n  }\n}];\n\nfor (let i = 0; i < allJobs.length; i += WEBHOOK_BATCH_SIZE) {\n  output.push({\n    json: {\n      content: '',\n      embeds: allJobs.slice(i, i + WEBHOOK_BATCH_SIZE).map(jobEmbed)\n    }\n  });\n}\nreturn output;\n"
+        "jsCode": "const WEBHOOK_BATCH_SIZE = 10;\nconst DISCORD_EMBED_CHAR_LIMIT = 5500;\n\nfunction formatSalary(min, max) {\n  if (!min && !max) return 'Salary not listed';\n  const fmt = (n) => '$' + Math.round(n / 1000) + 'k';\n  if (min && max && min !== max) return fmt(min) + '-' + fmt(max);\n  return fmt(min || max);\n}\n\nfunction jobEmbed(job) {\n  const isContract = job.flagged_contract;\n  const emoji = isContract ? '\ud83d\udfe1' : '\ud83d\udfe2';\n  const tag = isContract ? '[CONTRACT]' : '[FTE]';\n  const fields = [\n    { name: '\ud83d\udccd Location', value: job.location || 'Not listed', inline: true },\n    { name: '\ud83d\udcb0 Salary', value: formatSalary(job.salary_min, job.salary_max), inline: true },\n    { name: '\ud83d\udd17 Source', value: (job.source || 'unknown').toUpperCase(), inline: true },\n    { name: '\u2b50 Score', value: String(job.score), inline: true },\n  ];\n  if (job.ollama_summary) {\n    fields.push({ name: '\ud83e\udd16 Summary', value: job.ollama_summary.slice(0, 1024), inline: false });\n  }\n  return {\n    title: (emoji + ' ' + tag + ' ' + job.title + ' \u2014 ' + (job.company || 'Unknown Company')).slice(0, 256),\n    url: job.url || '',\n    color: isContract ? 0xFFA500 : 0x00C853,\n    fields,\n    footer: { text: isContract ? 'Flagged: contract/C2C' : 'FTE' },\n  };\n}\n\nconst allJobs = (items[0].json.data || items.map(i => i.json))\n  .sort((a, b) => b.score - a.score);\n\nconst fteCount = allJobs.filter(j => !j.flagged_contract).length;\nconst contractCount = allJobs.filter(j => j.flagged_contract).length;\n\nconst output = [{\n  json: {\n    content: '\ud83d\udccb **Daily Job Digest** \u2014 ' + allJobs.length + ' new jobs (' + fteCount + ' FTE, ' + contractCount + ' contract)',\n    embeds: []\n  }\n}];\n\nlet batch = [];\nlet batchChars = 0;\nfor (const job of allJobs) {\n  const embed = jobEmbed(job);\n  const embedChars = JSON.stringify(embed).length;\n  if (batch.length > 0 && (batch.length >= WEBHOOK_BATCH_SIZE || batchChars + embedChars > DISCORD_EMBED_CHAR_LIMIT)) {\n    output.push({ json: { content: '', embeds: batch } });\n    batch = [];\n    batchChars = 0;\n  }\n  batch.push(embed);\n  batchChars += embedChars;\n}\nif (batch.length > 0) {\n  output.push({ json: { content: '', embeds: batch } });\n}\n\nreturn output;"
       },
       "id": "7fbd2afc-937e-4452-ad20-b955b841a642",
       "name": "Discord Format",
@@ -471,9 +471,9 @@
     "templateCredsSetupCompleted": true
   },
   "pinData": {},
-  "versionId": "b5e523a4-4059-40c8-b9e2-55e58cf693d0",
+  "versionId": "7c8bef42-5130-4860-8aeb-7b31b645ec29",
   "activeVersionId": null,
-  "versionCounter": 73,
+  "versionCounter": 74,
   "triggerCount": 0,
   "shared": [
     {

@@ -4,6 +4,7 @@
 // Jobs are sorted descending by score before batching.
 
 const WEBHOOK_BATCH_SIZE = 10;
+const DISCORD_EMBED_CHAR_LIMIT = 5500; // Discord hard limit is 6000; leave headroom
 
 function formatSalary(min, max) {
   if (!min && !max) return "Salary not listed";
@@ -50,13 +51,22 @@ const output = [{
   }
 }];
 
-for (let i = 0; i < allJobs.length; i += WEBHOOK_BATCH_SIZE) {
-  output.push({
-    json: {
-      content: "",
-      embeds: allJobs.slice(i, i + WEBHOOK_BATCH_SIZE).map(jobEmbed)
-    }
-  });
+// Batch by both count (max 10) and total embed char count (max 5500)
+let batch = [];
+let batchChars = 0;
+for (const job of allJobs) {
+  const embed = jobEmbed(job);
+  const embedChars = JSON.stringify(embed).length;
+  if (batch.length > 0 && (batch.length >= WEBHOOK_BATCH_SIZE || batchChars + embedChars > DISCORD_EMBED_CHAR_LIMIT)) {
+    output.push({ json: { content: "", embeds: batch } });
+    batch = [];
+    batchChars = 0;
+  }
+  batch.push(embed);
+  batchChars += embedChars;
+}
+if (batch.length > 0) {
+  output.push({ json: { content: "", embeds: batch } });
 }
 
 return output;
