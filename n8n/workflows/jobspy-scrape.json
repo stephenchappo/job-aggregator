@@ -1,5 +1,5 @@
 {
-  "updatedAt": "2026-04-02T17:29:01.821Z",
+  "updatedAt": "2026-04-02T17:30:59.780Z",
   "createdAt": "2026-04-02T01:04:05.704Z",
   "id": "nEoZoAorG3d5YtaI",
   "name": "JobSpy Daily Scrape",
@@ -205,7 +205,7 @@
     },
     {
       "parameters": {
-        "jsCode": "// Ollama summariser -- runs after Score Jobs, before Aggregate\n// LinkedIn jobs: skip (no description available via API)\n// Jobs with no description: skip (ollama_summary = null)\n// All others: call Ollama llama3.2 for company blurb + 5 bullet takeaways\n// If Ollama errors/times out: graceful fallback message\n\nconst OLLAMA_URL = 'http://192.168.1.151:11434/api/generate';\nconst MODEL = 'llama3.2';\nconst TIMEOUT_MS = 60000;\n\nasync function callOllama(prompt) {\n  const body = JSON.stringify({\n    model: MODEL,\n    prompt: prompt,\n    stream: false,\n    options: { temperature: 0.3, num_predict: 300 }\n  });\n\n  const response = await $helpers.httpRequest({\n    method: 'POST',\n    url: OLLAMA_URL,\n    body: body,\n    headers: { 'Content-Type': 'application/json' },\n    timeout: TIMEOUT_MS,\n  });\n\n  return response.response || response.body?.response || null;\n}\n\nconst output = [];\n\nfor (const item of items) {\n  const job = { ...item.json };\n\n  if (job.source === 'linkedin') {\n    job.ollama_summary = 'LinkedIn does not provide job descriptions via API so none provided.';\n    output.push({ json: job });\n    continue;\n  }\n\n  if (!job.description) {\n    job.ollama_summary = null;\n    output.push({ json: job });\n    continue;\n  }\n\n  const prompt = 'You are summarising a job listing for a senior SRE/DevOps engineer reviewing job opportunities.\n\n'\n    + 'Job title: ' + job.title + '\n'\n    + 'Company: ' + (job.company || 'Unknown') + '\n'\n    + 'Location: ' + (job.location || 'Unknown') + '\n\n'\n    + 'Job description:\n'\n    + (job.description || '').slice(0, 3000) + '\n\n'\n    + 'Respond in exactly this format, nothing else:\n\n'\n    + 'Company: <2 sentences max about the company>\n'\n    + 'Takeaways:\n'\n    + '* <key takeaway 1>\n'\n    + '* <key takeaway 2>\n'\n    + '* <key takeaway 3>\n'\n    + '* <key takeaway 4>\n'\n    + '* <key takeaway 5>';\n\n  try {\n    const result = await callOllama(prompt);\n    job.ollama_summary = result ? result.trim() : '(Ollama returned empty response)';\n  } catch (err) {\n    job.ollama_summary = '(Ollama did not respond: ' + (err.message || 'timeout') + ')';\n  }\n\n  output.push({ json: job });\n}\n\nreturn output;"
+        "jsCode": "const OLLAMA_URL = 'http://192.168.1.151:11434/api/generate';\nconst MODEL = 'llama3.2';\nconst TIMEOUT_MS = 60000;\n\nasync function callOllama(prompt) {\n  const body = JSON.stringify({ model: MODEL, prompt: prompt, stream: false, options: { temperature: 0.3, num_predict: 300 } });\n  const response = await $helpers.httpRequest({ method: 'POST', url: OLLAMA_URL, body: body, headers: { 'Content-Type': 'application/json' }, timeout: TIMEOUT_MS });\n  return response.response || (response.body && response.body.response) || null;\n}\n\nconst output = [];\nfor (const item of items) {\n  const job = Object.assign({}, item.json);\n\n  if (job.source === 'linkedin') {\n    job.ollama_summary = 'LinkedIn does not provide job descriptions via API so none provided.';\n    output.push({ json: job });\n    continue;\n  }\n\n  if (!job.description) {\n    job.ollama_summary = null;\n    output.push({ json: job });\n    continue;\n  }\n\n  const lines = [\n    'You are summarising a job listing for a senior SRE/DevOps engineer reviewing job opportunities.',\n    '',\n    'Job title: ' + job.title,\n    'Company: ' + (job.company || 'Unknown'),\n    'Location: ' + (job.location || 'Unknown'),\n    '',\n    'Job description:',\n    (job.description || '').slice(0, 3000),\n    '',\n    'Respond in exactly this format, nothing else:',\n    '',\n    'Company: <2 sentences max about the company>',\n    'Takeaways:',\n    '* <key takeaway 1>',\n    '* <key takeaway 2>',\n    '* <key takeaway 3>',\n    '* <key takeaway 4>',\n    '* <key takeaway 5>'\n  ];\n  const prompt = lines.join('\n');\n\n  try {\n    const result = await callOllama(prompt);\n    job.ollama_summary = result ? result.trim() : '(Ollama returned empty response)';\n  } catch (err) {\n    job.ollama_summary = '(Ollama did not respond: ' + (err.message || 'timeout') + ')';\n  }\n\n  output.push({ json: job });\n}\n\nreturn output;"
       },
       "id": "a1b2c3d4-0001-0001-0001-000000000030",
       "name": "Ollama Summarise",
@@ -471,9 +471,9 @@
     "templateCredsSetupCompleted": true
   },
   "pinData": {},
-  "versionId": "9860e7d6-40a9-4967-ab1f-efebaa0e2fea",
+  "versionId": "e0fcf005-128f-40b0-8148-68b7013abba0",
   "activeVersionId": null,
-  "versionCounter": 68,
+  "versionCounter": 69,
   "triggerCount": 0,
   "shared": [
     {
