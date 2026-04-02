@@ -1,1 +1,499 @@
-{"id": "nEoZoAorG3d5YtaI", "name": "JobSpy Daily Scrape", "nodes": [{"parameters": {"rule": {"interval": [{"field": "cronExpression", "expression": "0 7 * * *"}]}}, "id": "872db2be-6ea6-4a15-9afd-396e0bafc02b", "name": "Schedule Trigger", "type": "n8n-nodes-base.scheduleTrigger", "typeVersion": 1.1, "position": [2256, -336]}, {"parameters": {"jsCode": "// Scheduled run \u2014 full result counts\nconst searches = [\n  { search_term: \"Site Reliability Engineer\", location: \"San Jose, CA\", distance: 50, results_wanted: 20 },\n  { search_term: \"SRE\", location: \"San Francisco, CA\", distance: 50, results_wanted: 20 },\n  { search_term: \"Staff SRE\", location: \"United States\", distance: null, results_wanted: 15 },\n  { search_term: \"Principal SRE\", location: \"United States\", distance: null, results_wanted: 15 },\n  { search_term: \"DevOps Engineer\", location: \"San Jose, CA\", distance: 50, results_wanted: 20 },\n  { search_term: \"Platform Engineer\", location: \"San Jose, CA\", distance: 50, results_wanted: 20 },\n  { search_term: \"Infrastructure Engineer\", location: \"San Jose, CA\", distance: 50, results_wanted: 15 }\n];\nconst sites = [\"indeed\", \"linkedin\", \"zip_recruiter\", \"glassdoor\"];\nconst output = [];\nfor (const s of searches) {\n  for (const site of sites) {\n    const payload = { search_term: s.search_term, location: s.location, job_type: \"fulltime\", is_remote: true, results_wanted: s.results_wanted, site_name: [site], country_indeed: \"USA\" };\n    if (s.distance !== null) payload.distance = s.distance;\n    output.push({ json: { body: JSON.stringify(payload), isTest: false } });\n  }\n}\nreturn output;"}, "id": "2d46b162-b01b-4acc-89b7-629e1cae0ebd", "name": "Load Searches", "type": "n8n-nodes-base.code", "typeVersion": 2, "position": [2480, -336]}, {"parameters": {"method": "POST", "url": "http://192.168.1.151:8088/api/v1/search_jobs", "sendHeaders": true, "headerParameters": {"parameters": [{"name": "Content-Type", "value": "application/json"}]}, "sendBody": true, "contentType": "raw", "rawContentType": "application/json", "body": "={{ $json.body }}", "options": {"timeout": 300000}}, "id": "f8394f30-6c34-4b79-b225-e2870b1269ca", "name": "JobSpy API Request", "type": "n8n-nodes-base.httpRequest", "typeVersion": 4.2, "position": [2704, -336]}, {"parameters": {"jsCode": "// Normalisation \u2014 maps JobSpy API response fields to common schema\nconst crypto = require('crypto');\n\nfunction makeJobId(source, company, title, url) {\n  const raw = `${source}:${(company || \"\").toLowerCase()}:${(title || \"\").toLowerCase()}:${(url || \"\").slice(-40)}`;\n  return crypto.createHash('md5').update(raw).digest('hex');\n}\n\nfunction parseSalary(salaryStr) {\n  if (!salaryStr) return { min: null, max: null };\n  const str = salaryStr.replace(/,/g, '').toLowerCase();\n  const hourly = str.includes('/hr') || str.includes('per hour') || str.includes('hourly');\n  const nums = str.match(/\\d+\\.?\\d*/g);\n  if (!nums) return { min: null, max: null };\n  let vals = nums.map(Number);\n  if (hourly) vals = vals.map(v => v * 2080);\n  if (vals.some(v => v < 1000)) vals = vals.map(v => v * 1000);\n  return { min: vals[0] || null, max: vals[1] || vals[0] || null };\n}\n\nconst output = [];\nfor (const item of items) {\n  const raw = item.json;\n  const jobs = Array.isArray(raw.jobs) ? raw.jobs : [raw];\n  for (const job of jobs) {\n    const source = (job.site || job.source || \"unknown\").toLowerCase();\n    const salary = parseSalary(job.salary || job.salary_range || job.min_amount_str);\n    const salMin = job.min_amount ? Math.round(job.min_amount) : salary.min;\n    const salMax = job.max_amount ? Math.round(job.max_amount) : salary.max;\n    output.push({\n      json: {\n        job_id: makeJobId(source, job.company, job.title, job.job_url || job.url),\n        source: source,\n        title: job.title || null,\n        company: job.company || null,\n        location: job.location || null,\n        url: job.job_url || job.url || null,\n        salary_min: salMin,\n        salary_max: salMax,\n        employment_type: job.job_type || job.employment_type || \"unknown\",\n        description: job.description || null,\n        posted_at: job.date_posted || job.posted_at || null,\n        raw_json: job\n      }\n    });\n  }\n}\nreturn output;"}, "id": "1950bfc4-e3ee-4c5e-85a8-8845cec52ae9", "name": "Normalise", "type": "n8n-nodes-base.code", "typeVersion": 2, "position": [2928, -336]}, {"parameters": {"jsCode": "const isTest = items[0]?.json?.isTest === true;\nif (isTest) {\n  return items.map(item => ({ json: { ...item.json, is_new: true } }));\n}\nreturn items;"}, "id": "0869e92c-9dad-4d91-9a2a-8f0a5977f351", "name": "DB Gate", "type": "n8n-nodes-base.code", "typeVersion": 2, "position": [3152, -336]}, {"parameters": {"conditions": {"options": {"caseSensitive": true, "leftValue": "", "typeValidation": "strict", "version": 1}, "conditions": [{"id": "a1b2c3d4-0001-0001-0001-000000000051", "leftValue": "={{ $json.is_new }}", "rightValue": true, "operator": {"type": "boolean", "operation": "true"}}], "combinator": "and"}, "options": {}}, "id": "a7422200-66c8-45a6-99b0-cb770f7f0340", "name": "New Jobs Only", "type": "n8n-nodes-base.filter", "typeVersion": 2, "position": [3824, -336]}, {"parameters": {"jsCode": "// Job scoring logic\nconst FILTERS = {\n  minSalary: 170000,\n  targetSalary: 200000,\n  contractKeywords: [\"contract\", \"c2c\", \"corp-to-corp\", \"1099\", \"w2 only\", \"w2 contract\", \"6-month\", \"12-month\", \"temp\"],\n  agencyKeywords: [\"staffing\", \"recruiting\", \"talent\", \"solutions llc\", \"consulting group\", \"resources inc\", \"workforce\"],\n  fteKeywords: [\"full-time\", \"full time\", \"permanent\", \"fte\", \"direct hire\"],\n  juniorKeywords: [\"junior\", \"entry level\", \"associate\", \"intern\", \"graduate\"],\n  contractIncludeThreshold: 60,\n  fteIncludeThreshold: 40,\n};\n\nfunction containsAny(text, keywords) {\n  if (!text) return false;\n  const lower = text.toLowerCase();\n  return keywords.some(k => lower.includes(k));\n}\n\nfunction scoreJob(job) {\n  let score = 50;\n  let flaggedContract = false;\n  const titleAndDesc = `${job.title || \"\"} ${job.description || \"\"}`;\n  const companyName = job.company || \"\";\n  const salMin = job.salary_min || 0;\n  const salMax = job.salary_max || 0;\n  const salRef = salMax || salMin;\n\n  if (salRef > 0 && salRef < FILTERS.minSalary) return { score: 0, flaggedContract: false, include: false };\n  if (salRef >= FILTERS.targetSalary) score += 10;\n  else if (salRef >= FILTERS.minSalary) score += 5;\n\n  const isFTE = job.employment_type === \"fulltime\" || containsAny(titleAndDesc, FILTERS.fteKeywords);\n  if (isFTE) score += 20;\n\n  const isContractTitle = containsAny(titleAndDesc, FILTERS.contractKeywords);\n  const isAgency = containsAny(companyName, FILTERS.agencyKeywords);\n  if (isContractTitle || isAgency) {\n    score -= (isContractTitle ? 30 : 0) + (isAgency ? 20 : 0);\n    flaggedContract = true;\n  }\n\n  if (containsAny(job.title, FILTERS.juniorKeywords)) score -= 20;\n  if (containsAny(titleAndDesc, [\"equity\", \"rsu\", \"stock options\", \"espp\"])) score += 10;\n\n  const threshold = flaggedContract ? FILTERS.contractIncludeThreshold : FILTERS.fteIncludeThreshold;\n  return { score, flaggedContract, include: score >= threshold };\n}\n\nconst output = [];\nfor (const item of items) {\n  const job = item.json;\n  const result = scoreJob(job);\n  if (result.include) {\n    output.push({ json: { ...job, score: result.score, flagged_contract: result.flaggedContract } });\n  }\n}\nreturn output;\n"}, "id": "f127600a-8157-4ed6-b22b-119eebfa70fe", "name": "Score Jobs", "type": "n8n-nodes-base.code", "typeVersion": 2, "position": [4048, -336]}, {"parameters": {"aggregate": "aggregateAllItemData", "options": {}}, "id": "3f0806cf-81f2-46e6-b253-e17d51bfb137", "name": "Aggregate All Jobs", "type": "n8n-nodes-base.aggregate", "typeVersion": 1, "position": [4496, -336]}, {"parameters": {"jsCode": "// Discord formatter \u2014 sorted descending by score, includes Ollama summary\nconst WEBHOOK_BATCH_SIZE = 10;\n\nfunction formatSalary(min, max) {\n  if (!min && !max) return 'Salary not listed';\n  const fmt = (n) => `$${Math.round(n / 1000)}k`;\n  if (min && max && min !== max) return `${fmt(min)}\\u2013${fmt(max)}`;\n  return fmt(min || max);\n}\n\nfunction jobEmbed(job) {\n  const isContract = job.flagged_contract;\n  const emoji = isContract ? '\\uD83D\\uDFE1' : '\\uD83D\\uDFE2';\n  const tag = isContract ? '[CONTRACT \\u26A0\\uFE0F]' : '[FTE]';\n  const fields = [\n    { name: '\\uD83D\\uDCCD Location', value: job.location || 'Not listed', inline: true },\n    { name: '\\uD83D\\uDCB0 Salary', value: formatSalary(job.salary_min, job.salary_max), inline: true },\n    { name: '\\uD83D\\uDD17 Source', value: (job.source || 'unknown').toUpperCase(), inline: true },\n    { name: '\\u2B50 Score', value: String(job.score), inline: true },\n  ];\n\n  if (job.ollama_summary) {\n    fields.push({ name: '\\uD83E\\uDD16 Summary', value: job.ollama_summary.slice(0, 1024), inline: false });\n  }\n\n  return {\n    title: `${emoji} ${tag} ${job.title} \\u2014 ${job.company || 'Unknown Company'}`,\n    url: job.url || '',\n    color: isContract ? 0xFFA500 : 0x00C853,\n    fields,\n    footer: { text: isContract ? 'Flagged: contract/C2C \\u2014 included on merit' : 'FTE' }\n  };\n}\n\nconst allJobs = (items[0].json.data || items.map(i => i.json))\n  .sort((a, b) => b.score - a.score);\n\nconst fteCount = allJobs.filter(j => !j.flagged_contract).length;\nconst contractCount = allJobs.filter(j => j.flagged_contract).length;\n\nconst output = [{\n  json: {\n    content: `\\uD83D\\uDCCB **Daily Job Digest** \\u2014 ${allJobs.length} new jobs (${fteCount} FTE, ${contractCount} contract)`,\n    embeds: []\n  }\n}];\n\nfor (let i = 0; i < allJobs.length; i += WEBHOOK_BATCH_SIZE) {\n  output.push({\n    json: {\n      content: '',\n      embeds: allJobs.slice(i, i + WEBHOOK_BATCH_SIZE).map(jobEmbed)\n    }\n  });\n}\nreturn output;\n"}, "id": "7fbd2afc-937e-4452-ad20-b955b841a642", "name": "Discord Format", "type": "n8n-nodes-base.code", "typeVersion": 2, "position": [4720, -336]}, {"parameters": {"method": "POST", "url": "https://discord.com/api/webhooks/1489012692646625342/8h9jn7apnZxz6ZZQINSi5Goeh9T-Sr3OVBOrTajzuQVDN_khGdR1cqYWYfeHoHx9_jrk", "sendHeaders": true, "headerParameters": {"parameters": [{"name": "Content-Type", "value": "application/json"}]}, "sendBody": true, "contentType": "raw", "rawContentType": "application/json", "body": "={{ JSON.stringify($json) }}", "options": {"batching": {"batch": {"batchSize": 1}}}}, "id": "7e51a2c0-928a-4ab1-97c5-cd6403d97c38", "name": "Discord Webhook", "type": "n8n-nodes-base.httpRequest", "typeVersion": 4.2, "position": [4944, -336]}, {"parameters": {"jsCode": "// Ollama summariser \u2014 runs after Score Jobs, before Aggregate\n// - LinkedIn jobs: skip (no description available via API)\n// - Jobs with no description: skip\n// - All others: call Ollama llama3.2 for company blurb + 5 bullet takeaways\n// - If Ollama errors/times out: graceful fallback message\n\nconst OLLAMA_URL = 'http://192.168.1.151:11434/api/generate';\nconst MODEL = 'llama3.2';\nconst TIMEOUT_MS = 60000;\n\nasync function callOllama(prompt) {\n  const body = JSON.stringify({\n    model: MODEL,\n    prompt: prompt,\n    stream: false,\n    options: { temperature: 0.3, num_predict: 300 }\n  });\n\n  const response = await $http.request({\n    method: 'POST',\n    url: OLLAMA_URL,\n    body: body,\n    headers: { 'Content-Type': 'application/json' },\n    timeout: TIMEOUT_MS,\n  });\n\n  return response.response || response.body?.response || null;\n}\n\nconst output = [];\n\nfor (const item of items) {\n  const job = { ...item.json };\n\n  // LinkedIn never provides descriptions via API\n  if (job.source === 'linkedin') {\n    job.ollama_summary = 'LinkedIn does not provide job descriptions via API so none provided.';\n    output.push({ json: job });\n    continue;\n  }\n\n  // No description available\n  if (!job.description) {\n    job.ollama_summary = null;\n    output.push({ json: job });\n    continue;\n  }\n\n  const prompt = `You are summarising a job listing for a senior SRE/DevOps engineer reviewing job opportunities.\n\nJob title: ${job.title}\nCompany: ${job.company || 'Unknown'}\nLocation: ${job.location || 'Unknown'}\n\nJob description:\n${job.description.slice(0, 3000)}\n\nRespond in exactly this format, nothing else:\n\nCompany: <2 sentences max about the company>\nTakeaways:\n\u2022 <key takeaway 1>\n\u2022 <key takeaway 2>\n\u2022 <key takeaway 3>\n\u2022 <key takeaway 4>\n\u2022 <key takeaway 5>`;\n\n  try {\n    const result = await callOllama(prompt);\n    job.ollama_summary = result ? result.trim() : '(Ollama returned empty response)';\n  } catch (err) {\n    job.ollama_summary = `(Ollama did not respond: ${err.message || 'timeout'})`;\n  }\n\n  output.push({ json: job });\n}\n\nreturn output;\n"}, "id": "a1b2c3d4-0001-0001-0001-000000000030", "name": "Ollama Summarise", "type": "n8n-nodes-base.code", "typeVersion": 2, "position": [4272, -336]}, {"parameters": {"operation": "executeQuery", "query": "INSERT INTO jobs (job_id, source, title, company, location, url, salary_min, salary_max, employment_type, posted_at, raw_json)\nVALUES (\n  '{{ $json.job_id }}',\n  '{{ $json.source }}',\n  '{{ $json.title.replace(/'/g, \"''\") }}',\n  {{ $json.company ? `'${$json.company.replace(/'/g, \"''\")}'` : 'NULL' }},\n  {{ $json.location ? `'${$json.location.replace(/'/g, \"''\")}'` : 'NULL' }},\n  {{ $json.url ? `'${$json.url.replace(/'/g, \"''\")}'` : 'NULL' }},\n  {{ $json.salary_min !== null ? $json.salary_min : 'NULL' }},\n  {{ $json.salary_max !== null ? $json.salary_max : 'NULL' }},\n  '{{ ($json.employment_type || \"unknown\").replace(/'/g, \"''\") }}',\n  {{ $json.posted_at ? `'${$json.posted_at}'` : 'NULL' }},\n  '{{ JSON.stringify($json.raw_json).replace(/'/g, \"''\") }}'\n)\nON CONFLICT (job_id) DO UPDATE SET last_seen = NOW()\nRETURNING *, (xmax = 0) AS is_new;", "options": {}}, "id": "a1b2c3d4-0001-0001-0001-000000000033", "name": "Postgres Upsert", "type": "n8n-nodes-base.postgres", "typeVersion": 2.5, "position": [3600, -264], "credentials": {"postgres": {"id": "kF6NaI3dE6iLtAUX", "name": "Postgres account"}}}, {"id": "a1b2c3d4-0001-0001-0001-000000000040", "name": "Manual Trigger", "type": "n8n-nodes-base.manualTrigger", "typeVersion": 1, "position": [2260, -196], "parameters": {}}, {"id": "a1b2c3d4-0001-0001-0001-000000000041", "name": "Load Searches (test)", "type": "n8n-nodes-base.code", "typeVersion": 2, "position": [2480, -196], "parameters": {"jsCode": "// Test run \u2014 1 random search term, 2 results per site, random offset\nconst searches = [\n  { search_term: \"Site Reliability Engineer\", location: \"San Jose, CA\", distance: 50 },\n  { search_term: \"SRE\", location: \"San Francisco, CA\", distance: 50 },\n  { search_term: \"Staff SRE\", location: \"United States\", distance: null },\n  { search_term: \"Principal SRE\", location: \"United States\", distance: null },\n  { search_term: \"DevOps Engineer\", location: \"San Jose, CA\", distance: 50 },\n  { search_term: \"Platform Engineer\", location: \"San Jose, CA\", distance: 50 },\n  { search_term: \"Infrastructure Engineer\", location: \"San Jose, CA\", distance: 50 }\n];\nconst sites = [\"indeed\", \"linkedin\", \"zip_recruiter\", \"glassdoor\"];\nconst s = searches[Math.floor(Math.random() * searches.length)];\nreturn sites.map(site => {\n  const payload = { search_term: s.search_term, location: s.location, job_type: \"fulltime\", is_remote: true, results_wanted: 2, offset: Math.floor(Math.random() * 10), site_name: [site], country_indeed: \"USA\" };\n  if (s.distance !== null) payload.distance = s.distance;\n  return { json: { body: JSON.stringify(payload), isTest: true } };\n});"}}, {"id": "a1b2c3d4-0001-0001-0001-000000000034", "name": "Prod Only Filter", "type": "n8n-nodes-base.code", "typeVersion": 2, "position": [3372, -196], "parameters": {"jsCode": "return items.filter(i => i.json.isTest !== true);"}}], "connections": {"Schedule Trigger": {"main": [[{"node": "Load Searches", "type": "main", "index": 0}]]}, "Load Searches": {"main": [[{"node": "JobSpy API Request", "type": "main", "index": 0}]]}, "JobSpy API Request": {"main": [[{"node": "Normalise", "type": "main", "index": 0}]]}, "Normalise": {"main": [[{"node": "DB Gate", "type": "main", "index": 0}]]}, "New Jobs Only": {"main": [[{"node": "Score Jobs", "type": "main", "index": 0}]]}, "Score Jobs": {"main": [[{"node": "Ollama Summarise", "type": "main", "index": 0}]]}, "Aggregate All Jobs": {"main": [[{"node": "Discord Format", "type": "main", "index": 0}]]}, "Discord Format": {"main": [[{"node": "Discord Webhook", "type": "main", "index": 0}]]}, "Ollama Summarise": {"main": [[{"node": "Aggregate All Jobs", "type": "main", "index": 0}]]}, "DB Gate": {"main": [[{"node": "New Jobs Only", "type": "main", "index": 0}, {"node": "Prod Only Filter", "type": "main", "index": 0}]]}, "Prod Only Filter": {"main": [[{"node": "Postgres Upsert", "type": "main", "index": 0}]]}, "Postgres Upsert": {"main": [[{"node": "New Jobs Only", "type": "main", "index": 0}]]}, "Manual Trigger": {"main": [[{"node": "Load Searches (test)", "type": "main", "index": 0}]]}, "Load Searches (test)": {"main": [[{"node": "JobSpy API Request", "type": "main", "index": 0}]]}}, "settings": {"executionOrder": "v1", "binaryMode": "separate", "callerPolicy": "workflowsFromSameOwner", "availableInMCP": false}, "staticData": null, "tags": [], "pinData": {}}
+{
+  "updatedAt": "2026-04-02T17:25:06.961Z",
+  "createdAt": "2026-04-02T01:04:05.704Z",
+  "id": "nEoZoAorG3d5YtaI",
+  "name": "JobSpy Daily Scrape",
+  "description": null,
+  "active": false,
+  "isArchived": false,
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 7 * * *"
+            }
+          ]
+        }
+      },
+      "id": "872db2be-6ea6-4a15-9afd-396e0bafc02b",
+      "name": "Schedule Trigger",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.1,
+      "position": [
+        2256,
+        -336
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Scheduled run \u2014 full result counts\nconst searches = [\n  { search_term: \"Site Reliability Engineer\", location: \"San Jose, CA\", distance: 50, results_wanted: 20 },\n  { search_term: \"SRE\", location: \"San Francisco, CA\", distance: 50, results_wanted: 20 },\n  { search_term: \"Staff SRE\", location: \"United States\", distance: null, results_wanted: 15 },\n  { search_term: \"Principal SRE\", location: \"United States\", distance: null, results_wanted: 15 },\n  { search_term: \"DevOps Engineer\", location: \"San Jose, CA\", distance: 50, results_wanted: 20 },\n  { search_term: \"Platform Engineer\", location: \"San Jose, CA\", distance: 50, results_wanted: 20 },\n  { search_term: \"Infrastructure Engineer\", location: \"San Jose, CA\", distance: 50, results_wanted: 15 }\n];\nconst sites = [\"indeed\", \"linkedin\", \"zip_recruiter\", \"glassdoor\"];\nconst output = [];\nfor (const s of searches) {\n  for (const site of sites) {\n    const payload = { search_term: s.search_term, location: s.location, job_type: \"fulltime\", is_remote: true, results_wanted: s.results_wanted, site_name: [site], country_indeed: \"USA\" };\n    if (s.distance !== null) payload.distance = s.distance;\n    output.push({ json: { body: JSON.stringify(payload), isTest: false } });\n  }\n}\nreturn output;"
+      },
+      "id": "2d46b162-b01b-4acc-89b7-629e1cae0ebd",
+      "name": "Load Searches",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2480,
+        -336
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://192.168.1.151:8088/api/v1/search_jobs",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ $json.body }}",
+        "options": {
+          "timeout": 300000
+        }
+      },
+      "id": "f8394f30-6c34-4b79-b225-e2870b1269ca",
+      "name": "JobSpy API Request",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        2704,
+        -240
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Normalisation -- maps JobSpy API response fields to common schema\nconst crypto = require('crypto');\n\nfunction makeJobId(source, company, title, url) {\n  const raw = [source, (company||'').toLowerCase(), (title||'').toLowerCase(), (url||'').slice(-40)].join(':');\n  return crypto.createHash('md5').update(raw).digest('hex');\n}\n\nfunction parseSalary(salaryStr) {\n  if (!salaryStr) return { min: null, max: null };\n  const str = salaryStr.replace(/,/g, '').toLowerCase();\n  const hourly = str.includes('/hr') || str.includes('per hour') || str.includes('hourly');\n  const nums = str.match(/\\d+\\.?\\d*/g);\n  if (!nums) return { min: null, max: null };\n  let vals = nums.map(Number);\n  if (hourly) vals = vals.map(v => v * 2080);\n  if (vals.some(v => v < 1000)) vals = vals.map(v => v * 1000);\n  return { min: vals[0] || null, max: vals[1] || vals[0] || null };\n}\n\nconst output = [];\nfor (const item of items) {\n  const raw = item.json;\n  const isTest = raw.isTest === true;\n  const jobs = Array.isArray(raw.jobs) ? raw.jobs : [raw];\n\n  for (const job of jobs) {\n    const source = (job.site || job.source || 'unknown').toLowerCase();\n    const salary = parseSalary(job.salary || job.salary_range || job.min_amount_str);\n    const isHourly = (job.interval || '').toLowerCase().includes('hour');\n    const salMin = job.min_amount ? Math.round(isHourly ? job.min_amount * 2080 : job.min_amount) : salary.min;\n    const salMax = job.max_amount ? Math.round(isHourly ? job.max_amount * 2080 : job.max_amount) : salary.max;\n\n    const normalised = {\n      job_id: makeJobId(source, job.company, job.title, job.job_url || job.url),\n      source: source,\n      title: job.title || null,\n      company: job.company || null,\n      location: job.location || null,\n      url: job.job_url || job.url || null,\n      salary_min: salMin,\n      salary_max: salMax,\n      employment_type: job.job_type || job.employment_type || 'unknown',\n      description: job.description || null,\n      posted_at: job.date_posted || job.posted_at || null,\n      isTest: isTest,\n      raw_json: job,\n    };\n    output.push({ json: normalised });\n  }\n}\nreturn output;"
+      },
+      "id": "1950bfc4-e3ee-4c5e-85a8-8845cec52ae9",
+      "name": "Normalise",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3144,
+        -240
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "const isTest = items[0]?.json?.isTest === true;\nif (isTest) {\n  return items.map(item => ({ json: { ...item.json, is_new: true } }));\n}\nreturn items;"
+      },
+      "id": "0869e92c-9dad-4d91-9a2a-8f0a5977f351",
+      "name": "DB Gate",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3152,
+        -240
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "id": "a1b2c3d4-0001-0001-0001-000000000051",
+              "leftValue": "={{ $json.is_new }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "a7422200-66c8-45a6-99b0-cb770f7f0340",
+      "name": "New Jobs Only",
+      "type": "n8n-nodes-base.filter",
+      "typeVersion": 2,
+      "position": [
+        3824,
+        -240
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Job scoring logic\nconst FILTERS = {\n  minSalary: 170000,\n  targetSalary: 200000,\n  contractKeywords: [\"contract\", \"c2c\", \"corp-to-corp\", \"1099\", \"w2 only\", \"w2 contract\", \"6-month\", \"12-month\", \"temp\"],\n  agencyKeywords: [\"staffing\", \"recruiting\", \"talent\", \"solutions llc\", \"consulting group\", \"resources inc\", \"workforce\"],\n  fteKeywords: [\"full-time\", \"full time\", \"permanent\", \"fte\", \"direct hire\"],\n  juniorKeywords: [\"junior\", \"entry level\", \"associate\", \"intern\", \"graduate\"],\n  contractIncludeThreshold: 60,\n  fteIncludeThreshold: 40,\n};\n\nfunction containsAny(text, keywords) {\n  if (!text) return false;\n  const lower = text.toLowerCase();\n  return keywords.some(k => lower.includes(k));\n}\n\nfunction scoreJob(job) {\n  let score = 50;\n  let flaggedContract = false;\n  const titleAndDesc = `${job.title || \"\"} ${job.description || \"\"}`;\n  const companyName = job.company || \"\";\n  const salMin = job.salary_min || 0;\n  const salMax = job.salary_max || 0;\n  const salRef = salMax || salMin;\n\n  if (salRef > 0 && salRef < FILTERS.minSalary) return { score: 0, flaggedContract: false, include: false };\n  if (salRef >= FILTERS.targetSalary) score += 10;\n  else if (salRef >= FILTERS.minSalary) score += 5;\n\n  const isFTE = job.employment_type === \"fulltime\" || containsAny(titleAndDesc, FILTERS.fteKeywords);\n  if (isFTE) score += 20;\n\n  const isContractTitle = containsAny(titleAndDesc, FILTERS.contractKeywords);\n  const isAgency = containsAny(companyName, FILTERS.agencyKeywords);\n  if (isContractTitle || isAgency) {\n    score -= (isContractTitle ? 30 : 0) + (isAgency ? 20 : 0);\n    flaggedContract = true;\n  }\n\n  if (containsAny(job.title, FILTERS.juniorKeywords)) score -= 20;\n  if (containsAny(titleAndDesc, [\"equity\", \"rsu\", \"stock options\", \"espp\"])) score += 10;\n\n  const threshold = flaggedContract ? FILTERS.contractIncludeThreshold : FILTERS.fteIncludeThreshold;\n  return { score, flaggedContract, include: score >= threshold };\n}\n\nconst output = [];\nfor (const item of items) {\n  const job = item.json;\n  const result = scoreJob(job);\n  if (result.include) {\n    output.push({ json: { ...job, score: result.score, flagged_contract: result.flaggedContract } });\n  }\n}\nreturn output;\n"
+      },
+      "id": "f127600a-8157-4ed6-b22b-119eebfa70fe",
+      "name": "Score Jobs",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        4048,
+        -240
+      ]
+    },
+    {
+      "parameters": {
+        "aggregate": "aggregateAllItemData",
+        "options": {}
+      },
+      "id": "3f0806cf-81f2-46e6-b253-e17d51bfb137",
+      "name": "Aggregate All Jobs",
+      "type": "n8n-nodes-base.aggregate",
+      "typeVersion": 1,
+      "position": [
+        4496,
+        -240
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Discord formatter \u2014 sorted descending by score, includes Ollama summary\nconst WEBHOOK_BATCH_SIZE = 10;\n\nfunction formatSalary(min, max) {\n  if (!min && !max) return 'Salary not listed';\n  const fmt = (n) => `$${Math.round(n / 1000)}k`;\n  if (min && max && min !== max) return `${fmt(min)}\\u2013${fmt(max)}`;\n  return fmt(min || max);\n}\n\nfunction jobEmbed(job) {\n  const isContract = job.flagged_contract;\n  const emoji = isContract ? '\\uD83D\\uDFE1' : '\\uD83D\\uDFE2';\n  const tag = isContract ? '[CONTRACT \\u26A0\\uFE0F]' : '[FTE]';\n  const fields = [\n    { name: '\\uD83D\\uDCCD Location', value: job.location || 'Not listed', inline: true },\n    { name: '\\uD83D\\uDCB0 Salary', value: formatSalary(job.salary_min, job.salary_max), inline: true },\n    { name: '\\uD83D\\uDD17 Source', value: (job.source || 'unknown').toUpperCase(), inline: true },\n    { name: '\\u2B50 Score', value: String(job.score), inline: true },\n  ];\n\n  if (job.ollama_summary) {\n    fields.push({ name: '\\uD83E\\uDD16 Summary', value: job.ollama_summary.slice(0, 1024), inline: false });\n  }\n\n  return {\n    title: `${emoji} ${tag} ${job.title} \\u2014 ${job.company || 'Unknown Company'}`,\n    url: job.url || '',\n    color: isContract ? 0xFFA500 : 0x00C853,\n    fields,\n    footer: { text: isContract ? 'Flagged: contract/C2C \\u2014 included on merit' : 'FTE' }\n  };\n}\n\nconst allJobs = (items[0].json.data || items.map(i => i.json))\n  .sort((a, b) => b.score - a.score);\n\nconst fteCount = allJobs.filter(j => !j.flagged_contract).length;\nconst contractCount = allJobs.filter(j => j.flagged_contract).length;\n\nconst output = [{\n  json: {\n    content: `\\uD83D\\uDCCB **Daily Job Digest** \\u2014 ${allJobs.length} new jobs (${fteCount} FTE, ${contractCount} contract)`,\n    embeds: []\n  }\n}];\n\nfor (let i = 0; i < allJobs.length; i += WEBHOOK_BATCH_SIZE) {\n  output.push({\n    json: {\n      content: '',\n      embeds: allJobs.slice(i, i + WEBHOOK_BATCH_SIZE).map(jobEmbed)\n    }\n  });\n}\nreturn output;\n"
+      },
+      "id": "7fbd2afc-937e-4452-ad20-b955b841a642",
+      "name": "Discord Format",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        4720,
+        -240
+      ]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://discord.com/api/webhooks/1489012692646625342/8h9jn7apnZxz6ZZQINSi5Goeh9T-Sr3OVBOrTajzuQVDN_khGdR1cqYWYfeHoHx9_jrk",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "application/json",
+        "body": "={{ JSON.stringify($json) }}",
+        "options": {
+          "batching": {
+            "batch": {
+              "batchSize": 1
+            }
+          }
+        }
+      },
+      "id": "7e51a2c0-928a-4ab1-97c5-cd6403d97c38",
+      "name": "Discord Webhook",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        4944,
+        -240
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Ollama summariser \u2014 runs after Score Jobs, before Aggregate\n// - LinkedIn jobs: skip (no description available via API)\n// - Jobs with no description: skip\n// - All others: call Ollama llama3.2 for company blurb + 5 bullet takeaways\n// - If Ollama errors/times out: graceful fallback message\n\nconst OLLAMA_URL = 'http://192.168.1.151:11434/api/generate';\nconst MODEL = 'llama3.2';\nconst TIMEOUT_MS = 60000;\n\nasync function callOllama(prompt) {\n  const body = JSON.stringify({\n    model: MODEL,\n    prompt: prompt,\n    stream: false,\n    options: { temperature: 0.3, num_predict: 300 }\n  });\n\n  const response = await $http.request({\n    method: 'POST',\n    url: OLLAMA_URL,\n    body: body,\n    headers: { 'Content-Type': 'application/json' },\n    timeout: TIMEOUT_MS,\n  });\n\n  return response.response || response.body?.response || null;\n}\n\nconst output = [];\n\nfor (const item of items) {\n  const job = { ...item.json };\n\n  // LinkedIn never provides descriptions via API\n  if (job.source === 'linkedin') {\n    job.ollama_summary = 'LinkedIn does not provide job descriptions via API so none provided.';\n    output.push({ json: job });\n    continue;\n  }\n\n  // No description available\n  if (!job.description) {\n    job.ollama_summary = null;\n    output.push({ json: job });\n    continue;\n  }\n\n  const prompt = `You are summarising a job listing for a senior SRE/DevOps engineer reviewing job opportunities.\n\nJob title: ${job.title}\nCompany: ${job.company || 'Unknown'}\nLocation: ${job.location || 'Unknown'}\n\nJob description:\n${job.description.slice(0, 3000)}\n\nRespond in exactly this format, nothing else:\n\nCompany: <2 sentences max about the company>\nTakeaways:\n\u2022 <key takeaway 1>\n\u2022 <key takeaway 2>\n\u2022 <key takeaway 3>\n\u2022 <key takeaway 4>\n\u2022 <key takeaway 5>`;\n\n  try {\n    const result = await callOllama(prompt);\n    job.ollama_summary = result ? result.trim() : '(Ollama returned empty response)';\n  } catch (err) {\n    job.ollama_summary = `(Ollama did not respond: ${err.message || 'timeout'})`;\n  }\n\n  output.push({ json: job });\n}\n\nreturn output;\n"
+      },
+      "id": "a1b2c3d4-0001-0001-0001-000000000030",
+      "name": "Ollama Summarise",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        4272,
+        -240
+      ]
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "INSERT INTO jobs (job_id, source, title, company, location, url, salary_min, salary_max, employment_type, posted_at, raw_json)\nVALUES (\n  '{{ $json.job_id }}',\n  '{{ $json.source }}',\n  '{{ $json.title.replace(/'/g, \"''\") }}',\n  {{ $json.company ? `'${$json.company.replace(/'/g, \"''\")}'` : 'NULL' }},\n  {{ $json.location ? `'${$json.location.replace(/'/g, \"''\")}'` : 'NULL' }},\n  {{ $json.url ? `'${$json.url.replace(/'/g, \"''\")}'` : 'NULL' }},\n  {{ $json.salary_min !== null ? $json.salary_min : 'NULL' }},\n  {{ $json.salary_max !== null ? $json.salary_max : 'NULL' }},\n  '{{ ($json.employment_type || \"unknown\").replace(/'/g, \"''\") }}',\n  {{ $json.posted_at ? `'${$json.posted_at}'` : 'NULL' }},\n  '{{ JSON.stringify($json.raw_json).replace(/'/g, \"''\") }}'\n)\nON CONFLICT (job_id) DO UPDATE SET last_seen = NOW()\nRETURNING *, (xmax = 0) AS is_new;",
+        "options": {}
+      },
+      "id": "a1b2c3d4-0001-0001-0001-000000000033",
+      "name": "Postgres Upsert",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.5,
+      "position": [
+        3600,
+        -168
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "kF6NaI3dE6iLtAUX",
+          "name": "Postgres account"
+        }
+      }
+    },
+    {
+      "parameters": {},
+      "id": "a1b2c3d4-0001-0001-0001-000000000040",
+      "name": "Manual Trigger",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        2256,
+        -144
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Test run \u2014 1 random search term, 2 results per site, random offset\nconst searches = [\n  { search_term: \"Site Reliability Engineer\", location: \"San Jose, CA\", distance: 50 },\n  { search_term: \"SRE\", location: \"San Francisco, CA\", distance: 50 },\n  { search_term: \"Staff SRE\", location: \"United States\", distance: null },\n  { search_term: \"Principal SRE\", location: \"United States\", distance: null },\n  { search_term: \"DevOps Engineer\", location: \"San Jose, CA\", distance: 50 },\n  { search_term: \"Platform Engineer\", location: \"San Jose, CA\", distance: 50 },\n  { search_term: \"Infrastructure Engineer\", location: \"San Jose, CA\", distance: 50 }\n];\nconst sites = [\"indeed\", \"linkedin\", \"zip_recruiter\", \"glassdoor\"];\nconst s = searches[Math.floor(Math.random() * searches.length)];\nreturn sites.map(site => {\n  const payload = { search_term: s.search_term, location: s.location, job_type: \"fulltime\", is_remote: true, results_wanted: 2, offset: Math.floor(Math.random() * 10), site_name: [site], country_indeed: \"USA\" };\n  if (s.distance !== null) payload.distance = s.distance;\n  return { json: { body: JSON.stringify(payload), isTest: true } };\n});"
+      },
+      "id": "a1b2c3d4-0001-0001-0001-000000000041",
+      "name": "Load Searches (test)",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2480,
+        -144
+      ]
+    },
+    {
+      "parameters": {
+        "jsCode": "return items.filter(i => i.json.isTest !== true);"
+      },
+      "id": "a1b2c3d4-0001-0001-0001-000000000034",
+      "name": "Prod Only Filter",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        3376,
+        -168
+      ]
+    },
+    {
+      "id": "a1b2c3d4-0001-0001-0001-000000000050",
+      "name": "Tag isTest",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2924,
+        -240
+      ],
+      "parameters": {
+        "jsCode": "// Detect if this is a test run by checking if Load Searches (test) ran\nlet isTest = false;\ntry {\n  const nodeName = 'Load Searches (test)';\n  const testItems = $(nodeName).all();\n  isTest = testItems.length > 0;\n} catch(e) {\n  isTest = false;\n}\nreturn items.map(item => ({ json: { ...item.json, isTest } }));"
+      }
+    }
+  ],
+  "connections": {
+    "Schedule Trigger": {
+      "main": [
+        [
+          {
+            "node": "Load Searches",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Load Searches": {
+      "main": [
+        [
+          {
+            "node": "JobSpy API Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "JobSpy API Request": {
+      "main": [
+        [
+          {
+            "node": "Tag isTest",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalise": {
+      "main": [
+        [
+          {
+            "node": "DB Gate",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "New Jobs Only": {
+      "main": [
+        [
+          {
+            "node": "Score Jobs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Score Jobs": {
+      "main": [
+        [
+          {
+            "node": "Ollama Summarise",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Aggregate All Jobs": {
+      "main": [
+        [
+          {
+            "node": "Discord Format",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Discord Format": {
+      "main": [
+        [
+          {
+            "node": "Discord Webhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ollama Summarise": {
+      "main": [
+        [
+          {
+            "node": "Aggregate All Jobs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "DB Gate": {
+      "main": [
+        [
+          {
+            "node": "New Jobs Only",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Prod Only Filter",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prod Only Filter": {
+      "main": [
+        [
+          {
+            "node": "Postgres Upsert",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Postgres Upsert": {
+      "main": [
+        [
+          {
+            "node": "New Jobs Only",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Manual Trigger": {
+      "main": [
+        [
+          {
+            "node": "Load Searches (test)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Load Searches (test)": {
+      "main": [
+        [
+          {
+            "node": "JobSpy API Request",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Tag isTest": {
+      "main": [
+        [
+          {
+            "node": "Normalise",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "callerPolicy": "workflowsFromSameOwner",
+    "availableInMCP": false
+  },
+  "staticData": null,
+  "meta": {
+    "templateCredsSetupCompleted": true
+  },
+  "pinData": {},
+  "versionId": "c8016f0c-70ac-4cd9-93bd-b7637b2544ca",
+  "activeVersionId": null,
+  "versionCounter": 66,
+  "triggerCount": 0,
+  "shared": [
+    {
+      "updatedAt": "2026-04-02T01:04:05.705Z",
+      "createdAt": "2026-04-02T01:04:05.705Z",
+      "role": "workflow:owner",
+      "workflowId": "nEoZoAorG3d5YtaI",
+      "projectId": "AbQgMzNEPJwPdzUw",
+      "project": {
+        "updatedAt": "2026-03-21T23:04:10.662Z",
+        "createdAt": "2026-03-21T22:57:28.098Z",
+        "id": "AbQgMzNEPJwPdzUw",
+        "name": "Scon Chapman <stephen.chappo@gmail.com>",
+        "type": "personal",
+        "icon": null,
+        "description": null,
+        "creatorId": "846ba0f0-89f7-4f7f-b8a2-233331113f34"
+      }
+    }
+  ],
+  "tags": [],
+  "activeVersion": null
+}

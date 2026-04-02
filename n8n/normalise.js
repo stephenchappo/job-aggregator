@@ -33,8 +33,9 @@ for (const item of items) {
   for (const job of jobs) {
     const source = (job.site || job.source || "unknown").toLowerCase();
     const salary = parseSalary(job.salary || job.salary_range || job.min_amount_str);
-    const salMin = job.min_amount ? Math.round(job.min_amount) : salary.min;
-    const salMax = job.max_amount ? Math.round(job.max_amount) : salary.max;
+    const isHourly = (job.interval || '').toLowerCase().includes('hour');
+    const salMin = job.min_amount ? Math.round(isHourly ? job.min_amount * 2080 : job.min_amount) : salary.min;
+    const salMax = job.max_amount ? Math.round(isHourly ? job.max_amount * 2080 : job.max_amount) : salary.max;
 
     const normalised = {
       job_id: makeJobId(source, job.company, job.title, job.job_url || job.url),
