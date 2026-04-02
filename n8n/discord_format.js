@@ -1,5 +1,5 @@
 // Discord formatter — Function node in n8n
-// Input: items[] of scored, deduped jobs
+// Input: items[] of scored, deduped jobs (with optional ollama_summary)
 // Output: one item per Discord embed batch (max 10 embeds per message)
 // Jobs are sorted descending by score before batching.
 
@@ -16,21 +16,24 @@ function jobEmbed(job) {
   const isContract = job.flagged_contract;
   const emoji = isContract ? "🟡" : "🟢";
   const tag = isContract ? "[CONTRACT ⚠️]" : "[FTE]";
-  const sourceLabel = (job.source || "unknown").toUpperCase();
-  const salary = formatSalary(job.salary_min, job.salary_max);
-  const location = job.location || "Location not listed";
+
+  const fields = [
+    { name: "📍 Location", value: job.location || "Not listed", inline: true },
+    { name: "💰 Salary", value: formatSalary(job.salary_min, job.salary_max), inline: true },
+    { name: "🔗 Source", value: (job.source || "unknown").toUpperCase(), inline: true },
+    { name: "⭐ Score", value: String(job.score), inline: true },
+  ];
+
+  if (job.ollama_summary) {
+    fields.push({ name: "🤖 Summary", value: job.ollama_summary.slice(0, 1024), inline: false });
+  }
 
   return {
     title: `${emoji} ${tag} ${job.title} — ${job.company || "Unknown Company"}`,
     url: job.url || "",
     color: isContract ? 0xFFA500 : 0x00C853,
-    fields: [
-      { name: "📍 Location", value: location, inline: true },
-      { name: "💰 Salary", value: salary, inline: true },
-      { name: "🔗 Source", value: sourceLabel, inline: true },
-      { name: "⭐ Score", value: String(job.score), inline: true },
-    ],
-    footer: { text: isContract ? `Flagged: contract/C2C — included on merit` : "FTE" },
+    fields,
+    footer: { text: isContract ? "Flagged: contract/C2C — included on merit" : "FTE" },
   };
 }
 
