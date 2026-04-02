@@ -1,5 +1,5 @@
 {
-  "updatedAt": "2026-04-02T17:25:06.961Z",
+  "updatedAt": "2026-04-02T17:29:01.821Z",
   "createdAt": "2026-04-02T01:04:05.704Z",
   "id": "nEoZoAorG3d5YtaI",
   "name": "JobSpy Daily Scrape",
@@ -205,7 +205,7 @@
     },
     {
       "parameters": {
-        "jsCode": "// Ollama summariser \u2014 runs after Score Jobs, before Aggregate\n// - LinkedIn jobs: skip (no description available via API)\n// - Jobs with no description: skip\n// - All others: call Ollama llama3.2 for company blurb + 5 bullet takeaways\n// - If Ollama errors/times out: graceful fallback message\n\nconst OLLAMA_URL = 'http://192.168.1.151:11434/api/generate';\nconst MODEL = 'llama3.2';\nconst TIMEOUT_MS = 60000;\n\nasync function callOllama(prompt) {\n  const body = JSON.stringify({\n    model: MODEL,\n    prompt: prompt,\n    stream: false,\n    options: { temperature: 0.3, num_predict: 300 }\n  });\n\n  const response = await $http.request({\n    method: 'POST',\n    url: OLLAMA_URL,\n    body: body,\n    headers: { 'Content-Type': 'application/json' },\n    timeout: TIMEOUT_MS,\n  });\n\n  return response.response || response.body?.response || null;\n}\n\nconst output = [];\n\nfor (const item of items) {\n  const job = { ...item.json };\n\n  // LinkedIn never provides descriptions via API\n  if (job.source === 'linkedin') {\n    job.ollama_summary = 'LinkedIn does not provide job descriptions via API so none provided.';\n    output.push({ json: job });\n    continue;\n  }\n\n  // No description available\n  if (!job.description) {\n    job.ollama_summary = null;\n    output.push({ json: job });\n    continue;\n  }\n\n  const prompt = `You are summarising a job listing for a senior SRE/DevOps engineer reviewing job opportunities.\n\nJob title: ${job.title}\nCompany: ${job.company || 'Unknown'}\nLocation: ${job.location || 'Unknown'}\n\nJob description:\n${job.description.slice(0, 3000)}\n\nRespond in exactly this format, nothing else:\n\nCompany: <2 sentences max about the company>\nTakeaways:\n\u2022 <key takeaway 1>\n\u2022 <key takeaway 2>\n\u2022 <key takeaway 3>\n\u2022 <key takeaway 4>\n\u2022 <key takeaway 5>`;\n\n  try {\n    const result = await callOllama(prompt);\n    job.ollama_summary = result ? result.trim() : '(Ollama returned empty response)';\n  } catch (err) {\n    job.ollama_summary = `(Ollama did not respond: ${err.message || 'timeout'})`;\n  }\n\n  output.push({ json: job });\n}\n\nreturn output;\n"
+        "jsCode": "// Ollama summariser -- runs after Score Jobs, before Aggregate\n// LinkedIn jobs: skip (no description available via API)\n// Jobs with no description: skip (ollama_summary = null)\n// All others: call Ollama llama3.2 for company blurb + 5 bullet takeaways\n// If Ollama errors/times out: graceful fallback message\n\nconst OLLAMA_URL = 'http://192.168.1.151:11434/api/generate';\nconst MODEL = 'llama3.2';\nconst TIMEOUT_MS = 60000;\n\nasync function callOllama(prompt) {\n  const body = JSON.stringify({\n    model: MODEL,\n    prompt: prompt,\n    stream: false,\n    options: { temperature: 0.3, num_predict: 300 }\n  });\n\n  const response = await $helpers.httpRequest({\n    method: 'POST',\n    url: OLLAMA_URL,\n    body: body,\n    headers: { 'Content-Type': 'application/json' },\n    timeout: TIMEOUT_MS,\n  });\n\n  return response.response || response.body?.response || null;\n}\n\nconst output = [];\n\nfor (const item of items) {\n  const job = { ...item.json };\n\n  if (job.source === 'linkedin') {\n    job.ollama_summary = 'LinkedIn does not provide job descriptions via API so none provided.';\n    output.push({ json: job });\n    continue;\n  }\n\n  if (!job.description) {\n    job.ollama_summary = null;\n    output.push({ json: job });\n    continue;\n  }\n\n  const prompt = 'You are summarising a job listing for a senior SRE/DevOps engineer reviewing job opportunities.\n\n'\n    + 'Job title: ' + job.title + '\n'\n    + 'Company: ' + (job.company || 'Unknown') + '\n'\n    + 'Location: ' + (job.location || 'Unknown') + '\n\n'\n    + 'Job description:\n'\n    + (job.description || '').slice(0, 3000) + '\n\n'\n    + 'Respond in exactly this format, nothing else:\n\n'\n    + 'Company: <2 sentences max about the company>\n'\n    + 'Takeaways:\n'\n    + '* <key takeaway 1>\n'\n    + '* <key takeaway 2>\n'\n    + '* <key takeaway 3>\n'\n    + '* <key takeaway 4>\n'\n    + '* <key takeaway 5>';\n\n  try {\n    const result = await callOllama(prompt);\n    job.ollama_summary = result ? result.trim() : '(Ollama returned empty response)';\n  } catch (err) {\n    job.ollama_summary = '(Ollama did not respond: ' + (err.message || 'timeout') + ')';\n  }\n\n  output.push({ json: job });\n}\n\nreturn output;"
       },
       "id": "a1b2c3d4-0001-0001-0001-000000000030",
       "name": "Ollama Summarise",
@@ -250,7 +250,7 @@
     },
     {
       "parameters": {
-        "jsCode": "// Test run \u2014 1 random search term, 2 results per site, random offset\nconst searches = [\n  { search_term: \"Site Reliability Engineer\", location: \"San Jose, CA\", distance: 50 },\n  { search_term: \"SRE\", location: \"San Francisco, CA\", distance: 50 },\n  { search_term: \"Staff SRE\", location: \"United States\", distance: null },\n  { search_term: \"Principal SRE\", location: \"United States\", distance: null },\n  { search_term: \"DevOps Engineer\", location: \"San Jose, CA\", distance: 50 },\n  { search_term: \"Platform Engineer\", location: \"San Jose, CA\", distance: 50 },\n  { search_term: \"Infrastructure Engineer\", location: \"San Jose, CA\", distance: 50 }\n];\nconst sites = [\"indeed\", \"linkedin\", \"zip_recruiter\", \"glassdoor\"];\nconst s = searches[Math.floor(Math.random() * searches.length)];\nreturn sites.map(site => {\n  const payload = { search_term: s.search_term, location: s.location, job_type: \"fulltime\", is_remote: true, results_wanted: 2, offset: Math.floor(Math.random() * 10), site_name: [site], country_indeed: \"USA\" };\n  if (s.distance !== null) payload.distance = s.distance;\n  return { json: { body: JSON.stringify(payload), isTest: true } };\n});"
+        "jsCode": "// Test run -- broad search term, 2 results per site, random offset for variety\nconst sites = ['indeed', 'linkedin', 'zip_recruiter', 'glassdoor'];\nconst offset = Math.floor(Math.random() * 10);\nreturn sites.map(site => {\n  const payload = {\n    search_term: 'Site Reliability Engineer',\n    location: 'United States',\n    job_type: 'fulltime',\n    is_remote: true,\n    results_wanted: 2,\n    offset: offset,\n    site_name: [site],\n    country_indeed: 'USA'\n  };\n  return { json: { body: JSON.stringify(payload), isTest: true } };\n});"
       },
       "id": "a1b2c3d4-0001-0001-0001-000000000041",
       "name": "Load Searches (test)",
@@ -471,9 +471,9 @@
     "templateCredsSetupCompleted": true
   },
   "pinData": {},
-  "versionId": "c8016f0c-70ac-4cd9-93bd-b7637b2544ca",
+  "versionId": "9860e7d6-40a9-4967-ab1f-efebaa0e2fea",
   "activeVersionId": null,
-  "versionCounter": 66,
+  "versionCounter": 68,
   "triggerCount": 0,
   "shared": [
     {

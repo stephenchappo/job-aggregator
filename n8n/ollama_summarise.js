@@ -16,7 +16,7 @@ async function callOllama(prompt) {
     options: { temperature: 0.3, num_predict: 300 }
   });
 
-  const response = await $http.request({
+  const response = await $helpers.httpRequest({
     method: 'POST',
     url: OLLAMA_URL,
     body: body,
