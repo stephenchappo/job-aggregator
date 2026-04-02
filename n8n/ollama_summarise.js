@@ -4,22 +4,27 @@
 // - All others: call Ollama llama3.2 for company blurb + 5 bullet takeaways
 // - If Ollama errors/times out: graceful fallback message
 //
-// NOTE: uses native fetch() — $http and $helpers are not available in n8n 2.x task runner.
+// NOTE: uses require('http') — fetch/$http/$helpers all unavailable in n8n task runner sandbox.
 // NOTE: uses String.fromCharCode(10) for NL — n8n API unescapes \n in jsCode strings on save.
+// NOTE: http (not https) — Ollama runs on local network without TLS.
 
-const OLLAMA_URL = 'http://192.168.1.151:11434/api/generate';
-const MODEL = 'llama3.2';
+const http = require('http');
 const NL = String.fromCharCode(10);
 
-async function callOllama(prompt) {
-  const res = await fetch(OLLAMA_URL, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ model: MODEL, prompt: prompt, stream: false, options: { temperature: 0.3, num_predict: 300 } }),
-    signal: AbortSignal.timeout(60000)
+function callOllama(prompt) {
+  return new Promise((resolve, reject) => {
+    const body = JSON.stringify({ model: 'llama3.2', prompt: prompt, stream: false, options: { temperature: 0.3, num_predict: 300 } });
+    const opts = { hostname: '192.168.1.151', port: 11434, path: '/api/generate', method: 'POST', headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(body) } };
+    const timer = setTimeout(() => { req.destroy(); reject(new Error('timeout')); }, 120000);
+    const req = http.request(opts, res => {
+      let data = '';
+      res.on('data', chunk => { data += chunk; });
+      res.on('end', () => { clearTimeout(timer); try { resolve(JSON.parse(data).response || null); } catch(e) { resolve(null); } });
+    });
+    req.on('error', e => { clearTimeout(timer); reject(e); });
+    req.write(body);
+    req.end();
   });
-  const data = await res.json();
-  return data.response || null;
 }
 
 const output = [];

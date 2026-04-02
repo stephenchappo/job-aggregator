@@ -1,5 +1,5 @@
 {
-  "updatedAt": "2026-04-02T17:39:30.549Z",
+  "updatedAt": "2026-04-02T23:15:00.089Z",
   "createdAt": "2026-04-02T01:04:05.704Z",
   "id": "nEoZoAorG3d5YtaI",
   "name": "JobSpy Daily Scrape",
@@ -205,7 +205,7 @@
     },
     {
       "parameters": {
-        "jsCode": "const OLLAMA_URL = 'http://192.168.1.151:11434/api/generate';\nconst MODEL = 'llama3.2';\nconst NL = String.fromCharCode(10);\n\nasync function callOllama(prompt) {\n  const res = await fetch(OLLAMA_URL, {\n    method: 'POST',\n    headers: { 'Content-Type': 'application/json' },\n    body: JSON.stringify({ model: MODEL, prompt: prompt, stream: false, options: { temperature: 0.3, num_predict: 300 } }),\n    signal: AbortSignal.timeout(60000)\n  });\n  const data = await res.json();\n  return data.response || null;\n}\n\nconst output = [];\nfor (const item of items) {\n  const job = Object.assign({}, item.json);\n\n  if (job.source === 'linkedin') {\n    job.ollama_summary = 'LinkedIn does not provide job descriptions via API so none provided.';\n    output.push({ json: job });\n    continue;\n  }\n\n  if (!job.description) {\n    job.ollama_summary = null;\n    output.push({ json: job });\n    continue;\n  }\n\n  const lines = [\n    'You are summarising a job listing for a senior SRE/DevOps engineer reviewing job opportunities.',\n    '',\n    'Job title: ' + job.title,\n    'Company: ' + (job.company || 'Unknown'),\n    'Location: ' + (job.location || 'Unknown'),\n    '',\n    'Job description:',\n    (job.description || '').slice(0, 3000),\n    '',\n    'Respond in exactly this format, nothing else:',\n    '',\n    'Company: <2 sentences max about the company>',\n    'Takeaways:',\n    '* <key takeaway 1>',\n    '* <key takeaway 2>',\n    '* <key takeaway 3>',\n    '* <key takeaway 4>',\n    '* <key takeaway 5>'\n  ];\n  const prompt = lines.join(NL);\n\n  try {\n    const result = await callOllama(prompt);\n    job.ollama_summary = result ? result.trim() : '(Ollama returned empty response)';\n  } catch (err) {\n    job.ollama_summary = '(Ollama did not respond: ' + (err.message || 'timeout') + ')';\n  }\n\n  output.push({ json: job });\n}\n\nreturn output;"
+        "jsCode": "const http = require('http');\nconst NL = String.fromCharCode(10);\n\nfunction callOllama(prompt) {\n  return new Promise((resolve, reject) => {\n    const body = JSON.stringify({ model: 'llama3.2', prompt: prompt, stream: false, options: { temperature: 0.3, num_predict: 300 } });\n    const opts = { hostname: '192.168.1.151', port: 11434, path: '/api/generate', method: 'POST', headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(body) } };\n    const timer = setTimeout(() => { req.destroy(); reject(new Error('timeout')); }, 120000);\n    const req = http.request(opts, res => {\n      let data = '';\n      res.on('data', chunk => { data += chunk; });\n      res.on('end', () => { clearTimeout(timer); try { resolve(JSON.parse(data).response || null); } catch(e) { resolve(null); } });\n    });\n    req.on('error', e => { clearTimeout(timer); reject(e); });\n    req.write(body);\n    req.end();\n  });\n}\n\nconst output = [];\nfor (const item of items) {\n  const job = Object.assign({}, item.json);\n\n  if (job.source === 'linkedin') {\n    job.ollama_summary = 'LinkedIn does not provide job descriptions via API so none provided.';\n    output.push({ json: job });\n    continue;\n  }\n\n  if (!job.description) {\n    job.ollama_summary = null;\n    output.push({ json: job });\n    continue;\n  }\n\n  const lines = [\n    'You are summarising a job listing for a senior SRE/DevOps engineer reviewing job opportunities.',\n    '',\n    'Job title: ' + job.title,\n    'Company: ' + (job.company || 'Unknown'),\n    'Location: ' + (job.location || 'Unknown'),\n    '',\n    'Job description:',\n    (job.description || '').slice(0, 3000),\n    '',\n    'Respond in exactly this format, nothing else:',\n    '',\n    'Company: <2 sentences max about the company>',\n    'Takeaways:',\n    '* <key takeaway 1>',\n    '* <key takeaway 2>',\n    '* <key takeaway 3>',\n    '* <key takeaway 4>',\n    '* <key takeaway 5>'\n  ];\n  const prompt = lines.join(NL);\n\n  try {\n    const result = await callOllama(prompt);\n    job.ollama_summary = result ? result.trim() : '(Ollama returned empty response)';\n  } catch (err) {\n    job.ollama_summary = '(Ollama did not respond: ' + (err.message || 'timeout') + ')';\n  }\n\n  output.push({ json: job });\n}\n\nreturn output;"
       },
       "id": "a1b2c3d4-0001-0001-0001-000000000030",
       "name": "Ollama Summarise",
@@ -250,7 +250,7 @@
     },
     {
       "parameters": {
-        "jsCode": "// Test run -- broad search term, 2 results per site, random offset for variety\nconst sites = ['indeed', 'linkedin', 'zip_recruiter', 'glassdoor'];\nconst offset = Math.floor(Math.random() * 10);\nreturn sites.map(site => {\n  const payload = {\n    search_term: 'Site Reliability Engineer',\n    location: 'United States',\n    job_type: 'fulltime',\n    is_remote: true,\n    results_wanted: 2,\n    offset: offset,\n    site_name: [site],\n    country_indeed: 'USA'\n  };\n  return { json: { body: JSON.stringify(payload), isTest: true } };\n});"
+        "jsCode": "// Test run -- broad search term, 10 results per site, random offset for variety\nconst sites = ['indeed', 'linkedin', 'zip_recruiter', 'glassdoor'];\nconst offset = Math.floor(Math.random() * 10);\nreturn sites.map(site => {\n  const payload = {\n    search_term: 'Site Reliability Engineer',\n    location: 'United States',\n    job_type: 'fulltime',\n    is_remote: true,\n    results_wanted: 10,\n    offset: offset,\n    site_name: [site],\n    country_indeed: 'USA'\n  };\n  return { json: { body: JSON.stringify(payload), isTest: true } };\n});"
       },
       "id": "a1b2c3d4-0001-0001-0001-000000000041",
       "name": "Load Searches (test)",
@@ -471,9 +471,9 @@
     "templateCredsSetupCompleted": true
   },
   "pinData": {},
-  "versionId": "7d447df4-2ead-436d-9b36-e1b265e5ed38",
+  "versionId": "b5e523a4-4059-40c8-b9e2-55e58cf693d0",
   "activeVersionId": null,
-  "versionCounter": 71,
+  "versionCounter": 73,
   "triggerCount": 0,
   "shared": [
     {
