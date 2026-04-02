@@ -57,7 +57,7 @@
       "results_wanted": 30
     }
   ],
-  "sources": ["indeed", "linkedin", "dice", "zip_recruiter"],
+  "sources": ["indeed", "linkedin", "zip_recruiter", "glassdoor"],
   "country_indeed": "USA",
   "filters": {
     "min_salary": 170000,
