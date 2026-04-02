@@ -7,6 +7,7 @@
 const OLLAMA_URL = 'http://192.168.1.151:11434/api/generate';
 const MODEL = 'llama3.2';
 const TIMEOUT_MS = 60000;
+const NL = String.fromCharCode(10); // avoid \n in string literals — n8n API unescapes them on save
 
 async function callOllama(prompt) {
   const body = JSON.stringify({ model: MODEL, prompt: prompt, stream: false, options: { temperature: 0.3, num_predict: 300 } });
@@ -50,7 +51,7 @@ for (const item of items) {
     '* <key takeaway 4>',
     '* <key takeaway 5>'
   ];
-  const prompt = lines.join('\n');
+  const prompt = lines.join(NL);
 
   try {
     const result = await callOllama(prompt);
