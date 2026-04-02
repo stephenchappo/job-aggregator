@@ -43,8 +43,18 @@
           ]
         },
         "sendBody": true,
-        "specifyBody": "json",
-        "jsonBody": "={\n  \"search_term\": {{ JSON.stringify($json.search_term) }},\n  \"location\": {{ JSON.stringify($json.location) }},\n  \"distance\": {{ $json.distance !== null ? $json.distance : 'null' }},\n  \"job_type\": {{ JSON.stringify($json.job_type) }},\n  \"is_remote\": {{ $json.is_remote }},\n  \"results_wanted\": {{ $json.results_wanted }},\n  \"site_name\": {{ JSON.stringify($json.site_name) }},\n  \"country_indeed\": \"USA\"\n}",
+        "bodyParameters": {
+          "parameters": [
+            { "name": "search_term", "value": "={{ $json.search_term }}" },
+            { "name": "location", "value": "={{ $json.location }}" },
+            { "name": "distance", "value": "={{ $json.distance }}" },
+            { "name": "job_type", "value": "={{ $json.job_type }}" },
+            { "name": "is_remote", "value": "={{ $json.is_remote }}" },
+            { "name": "results_wanted", "value": "={{ $json.results_wanted }}" },
+            { "name": "site_name", "value": "={{ $json.site_name }}" },
+            { "name": "country_indeed", "value": "USA" }
+          ]
+        },
         "options": {
           "timeout": 60000
         }
