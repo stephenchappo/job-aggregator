@@ -32,7 +32,7 @@
     {
       "parameters": {
         "method": "POST",
-        "url": "http://192.168.1.151:8088/api/v1/jobs/search",
+        "url": "http://192.168.1.151:8088/api/v1/search_jobs",
         "sendHeaders": true,
         "headerParameters": {
           "parameters": [
