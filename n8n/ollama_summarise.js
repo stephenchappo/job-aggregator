@@ -3,16 +3,23 @@
 // - Jobs with no description: skip (ollama_summary = null)
 // - All others: call Ollama llama3.2 for company blurb + 5 bullet takeaways
 // - If Ollama errors/times out: graceful fallback message
+//
+// NOTE: uses native fetch() — $http and $helpers are not available in n8n 2.x task runner.
+// NOTE: uses String.fromCharCode(10) for NL — n8n API unescapes \n in jsCode strings on save.
 
 const OLLAMA_URL = 'http://192.168.1.151:11434/api/generate';
 const MODEL = 'llama3.2';
-const TIMEOUT_MS = 60000;
-const NL = String.fromCharCode(10); // avoid \n in string literals — n8n API unescapes them on save
+const NL = String.fromCharCode(10);
 
 async function callOllama(prompt) {
-  const body = JSON.stringify({ model: MODEL, prompt: prompt, stream: false, options: { temperature: 0.3, num_predict: 300 } });
-  const response = await $helpers.httpRequest({ method: 'POST', url: OLLAMA_URL, body: body, headers: { 'Content-Type': 'application/json' }, timeout: TIMEOUT_MS });
-  return response.response || (response.body && response.body.response) || null;
+  const res = await fetch(OLLAMA_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ model: MODEL, prompt: prompt, stream: false, options: { temperature: 0.3, num_predict: 300 } }),
+    signal: AbortSignal.timeout(60000)
+  });
+  const data = await res.json();
+  return data.response || null;
 }
 
 const output = [];
