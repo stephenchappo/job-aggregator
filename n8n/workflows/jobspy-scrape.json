@@ -1,5 +1,5 @@
 {
-  "updatedAt": "2026-04-02T23:26:18.435Z",
+  "updatedAt": "2026-04-02T23:38:06.532Z",
   "createdAt": "2026-04-02T01:04:05.704Z",
   "id": "nEoZoAorG3d5YtaI",
   "name": "JobSpy Daily Scrape",
@@ -205,7 +205,7 @@
     },
     {
       "parameters": {
-        "jsCode": "const http = require('http');\nconst NL = String.fromCharCode(10);\n\nfunction callOllama(prompt) {\n  return new Promise((resolve, reject) => {\n    const body = JSON.stringify({ model: 'llama3.2', prompt: prompt, stream: false, options: { temperature: 0.3, num_predict: 300 } });\n    const opts = { hostname: '192.168.1.151', port: 11434, path: '/api/generate', method: 'POST', headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(body) } };\n    const timer = setTimeout(() => { req.destroy(); reject(new Error('timeout')); }, 120000);\n    const req = http.request(opts, res => {\n      let data = '';\n      res.on('data', chunk => { data += chunk; });\n      res.on('end', () => { clearTimeout(timer); try { resolve(JSON.parse(data).response || null); } catch(e) { resolve(null); } });\n    });\n    req.on('error', e => { clearTimeout(timer); reject(e); });\n    req.write(body);\n    req.end();\n  });\n}\n\nconst output = [];\nfor (const item of items) {\n  const job = Object.assign({}, item.json);\n\n  if (job.source === 'linkedin') {\n    job.ollama_summary = 'LinkedIn does not provide job descriptions via API so none provided.';\n    output.push({ json: job });\n    continue;\n  }\n\n  if (!job.description) {\n    job.ollama_summary = null;\n    output.push({ json: job });\n    continue;\n  }\n\n  const lines = [\n    'You are summarising a job listing for a senior SRE/DevOps engineer reviewing job opportunities.',\n    '',\n    'Job title: ' + job.title,\n    'Company: ' + (job.company || 'Unknown'),\n    'Location: ' + (job.location || 'Unknown'),\n    '',\n    'Job description:',\n    (job.description || '').slice(0, 3000),\n    '',\n    'Respond in exactly this format, nothing else:',\n    '',\n    'Company: <2 sentences max about the company>',\n    'Takeaways:',\n    '* <key takeaway 1>',\n    '* <key takeaway 2>',\n    '* <key takeaway 3>',\n    '* <key takeaway 4>',\n    '* <key takeaway 5>'\n  ];\n  const prompt = lines.join(NL);\n\n  try {\n    const result = await callOllama(prompt);\n    job.ollama_summary = result ? result.trim() : '(Ollama returned empty response)';\n  } catch (err) {\n    job.ollama_summary = '(Ollama did not respond: ' + (err.message || 'timeout') + ')';\n  }\n\n  output.push({ json: job });\n}\n\nreturn output;"
+        "jsCode": "const http = require('http');\nconst NL = String.fromCharCode(10);\n\nfunction callOllama(prompt) {\n  return new Promise((resolve, reject) => {\n    const body = JSON.stringify({ model: 'llama3.2', prompt: prompt, stream: false, options: { temperature: 0.3, num_predict: 300 } });\n    const opts = { hostname: '192.168.1.151', port: 11434, path: '/api/generate', method: 'POST', headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(body) } };\n    const timer = setTimeout(() => { req.destroy(); reject(new Error('timeout')); }, 120000);\n    const req = http.request(opts, res => {\n      let data = '';\n      res.on('data', chunk => { data += chunk; });\n      res.on('end', () => { clearTimeout(timer); try { resolve(JSON.parse(data).response || null); } catch(e) { resolve(null); } });\n    });\n    req.on('error', e => { clearTimeout(timer); reject(e); });\n    req.write(body);\n    req.end();\n  });\n}\n\nconst output = [];\nfor (const item of items) {\n  const job = Object.assign({}, item.json);\n  // description may be stripped by Postgres RETURNING * \u2014 fall back to raw_json\n  const description = job.description || (job.raw_json && job.raw_json.description) || null;\n\n  if (job.source === 'linkedin') {\n    job.ollama_summary = 'LinkedIn does not provide job descriptions via API so none provided.';\n    output.push({ json: job });\n    continue;\n  }\n\n  if (!description) {\n    job.ollama_summary = null;\n    output.push({ json: job });\n    continue;\n  }\n\n  const lines = [\n    'You are summarising a job listing for a senior SRE/DevOps engineer reviewing job opportunities.',\n    '',\n    'Job title: ' + job.title,\n    'Company: ' + (job.company || 'Unknown'),\n    'Location: ' + (job.location || 'Unknown'),\n    '',\n    'Job description:',\n    description.slice(0, 3000),\n    '',\n    'Respond in exactly this format, nothing else:',\n    '',\n    'Company: <2 sentences max about the company>',\n    'Takeaways:',\n    '* <key takeaway 1>',\n    '* <key takeaway 2>',\n    '* <key takeaway 3>',\n    '* <key takeaway 4>',\n    '* <key takeaway 5>'\n  ];\n  const prompt = lines.join(NL);\n\n  try {\n    const result = await callOllama(prompt);\n    job.ollama_summary = result ? result.trim() : '(Ollama returned empty response)';\n  } catch (err) {\n    job.ollama_summary = '(Ollama did not respond: ' + (err.message || 'timeout') + ')';\n  }\n\n  output.push({ json: job });\n}\n\nreturn output;"
       },
       "id": "a1b2c3d4-0001-0001-0001-000000000030",
       "name": "Ollama Summarise",
@@ -471,9 +471,9 @@
     "templateCredsSetupCompleted": true
   },
   "pinData": {},
-  "versionId": "7c8bef42-5130-4860-8aeb-7b31b645ec29",
+  "versionId": "6146878c-4719-4df9-ad21-25d79c49fa67",
   "activeVersionId": null,
-  "versionCounter": 74,
+  "versionCounter": 75,
   "triggerCount": 0,
   "shared": [
     {

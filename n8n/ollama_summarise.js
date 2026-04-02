@@ -30,6 +30,8 @@ function callOllama(prompt) {
 const output = [];
 for (const item of items) {
   const job = Object.assign({}, item.json);
+  // description is stripped by Postgres RETURNING * — fall back to raw_json
+  const description = job.description || (job.raw_json && job.raw_json.description) || null;
 
   if (job.source === 'linkedin') {
     job.ollama_summary = 'LinkedIn does not provide job descriptions via API so none provided.';
@@ -37,7 +39,7 @@ for (const item of items) {
     continue;
   }
 
-  if (!job.description) {
+  if (!description) {
     job.ollama_summary = null;
     output.push({ json: job });
     continue;
@@ -51,7 +53,7 @@ for (const item of items) {
     'Location: ' + (job.location || 'Unknown'),
     '',
     'Job description:',
-    (job.description || '').slice(0, 3000),
+    description.slice(0, 3000),
     '',
     'Respond in exactly this format, nothing else:',
     '',
