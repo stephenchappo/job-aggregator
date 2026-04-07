@@ -1,0 +1,45 @@
+paths:
+  input_dir: data/input
+  processing_dir: data/processing
+  archive_dir: data/archive
+  output_dir: data/output
+  cache_dir: data/cache
+  logs_dir: data/logs
+  db_path: data/meetpipe.sqlite3
+
+audio:
+  sample_rate: 16000
+  channels: 1
+  normalise_lufs: -16
+  highpass_hz: 70
+
+transcription:
+  engine: faster-whisper
+  model: large-v3
+  device: cuda
+  compute_type: float16
+  beam_size: 5
+  vad_filter: true
+  language: null
+  condition_on_previous_text: true
+  word_timestamps: true
+
+diarization:
+  engine: pyannote
+  pipeline: pyannote/speaker-diarization-community-1
+  device: cuda
+  min_speakers: null
+  max_speakers: null
+  hf_token_env: HUGGINGFACE_TOKEN
+
+postprocess:
+  min_turn_seconds: 0.8
+  merge_gap_seconds: 0.6
+  split_on_long_pause_seconds: 1.2
+  redact_fillers: false
+  paragraph_max_seconds: 45
+  unknown_overlap_threshold: 0.2
+
+summary:
+  enabled: false
+  model: null
