@@ -1,0 +1,33 @@
+[build-system]
+requires = ["setuptools>=69", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "cookbook-ingest"
+version = "0.1.0"
+description = "Local cookbook ebook ingestion pipeline for Obsidian recipe notes"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+  "beautifulsoup4>=4.12",
+  "pydantic>=2.7,<3",
+  "PyMuPDF>=1.24",
+  "PyYAML>=6.0",
+  "rich>=13.7",
+  "typer>=0.12",
+  "watchdog>=4.0",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8.1",
+]
+
+[project.scripts]
+cookbook-ingest = "cookbook_ingest.cli:app"
+
+[tool.setuptools]
+packages = ["cookbook_ingest"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

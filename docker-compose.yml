@@ -1,0 +1,52 @@
+services:
+  n8n:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: n8n-ytdlp:latest
+    container_name: n8n
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    env_file:
+      - /srv/docker/deepthought/.env   # shared: TZ, DOCKER_USER
+      - .env                            # n8n-specific secrets
+    environment:
+      - GENERIC_TIMEZONE=${TZ}
+      - N8N_HOST=${N8N_HOST}
+      - N8N_PORT=5678
+      - N8N_PROTOCOL=http
+      - WEBHOOK_URL=${WEBHOOK_URL}
+      - N8N_ENCRYPTION_KEY=${N8N_ENCRYPTION_KEY}
+      # Air-gap: disable all phone-home features
+      - N8N_DIAGNOSTICS_ENABLED=false
+      - N8N_DIAGNOSTICS_CONFIG_BACKEND=
+      - N8N_DIAGNOSTICS_CONFIG_FRONTEND=
+      - N8N_VERSION_NOTIFICATIONS_ENABLED=false
+      - N8N_TEMPLATES_ENABLED=false
+      - EXTERNAL_FRONTEND_HOOKS_URLS=
+      - N8N_ONBOARDING_FLOW_DISABLED=true
+      - N8N_SECURE_COOKIE=false
+      - N8N_ALLOW_EXEC=${N8N_ALLOW_EXEC}
+      - NODE_FUNCTION_ALLOW_BUILTIN=child_process,fs,crypto,https,http
+      - N8N_RUNNERS_TASK_TIMEOUT=300
+      - N8N_RUNNERS_HEARTBEAT_INTERVAL=30
+      - NODE_OPTIONS=--max-old-space-size=4096
+      # Execution pruning — keep last 500 executions per workflow
+      - EXECUTIONS_DATA_PRUNE=true
+      - EXECUTIONS_DATA_MAX_AGE=72
+      - EXECUTIONS_DATA_PRUNE_MAX_COUNT=500
+    mem_limit: 8g
+    memswap_limit: 8g
+    volumes:
+      - ./data:/home/node/.n8n
+      - ./ytdlp-sources.json:/home/node/.n8n-files/ytdlp-sources.json:ro
+      - /marvin/Music & Audio/Music:/music
+      - /marvin/Videos/Porn/RedGifs:/redgifs
+    ports:
+      - "5678:5678"
+    restart: unless-stopped
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "5m"
+        max-file: "3"

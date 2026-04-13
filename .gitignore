@@ -1,11 +1,6 @@
-# Secrets
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+.codex-temp/
 .env
-docker/.env
-*.secret
-
-# Logs
-*.log
-
-# OS
-.DS_Store
-Thumbs.db

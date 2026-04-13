@@ -1,0 +1,78 @@
+paths:
+  intake_root: E:/Documents/cookbook ingestion
+  jobs_dir: E:/Documents/cookbook ingestion/jobs
+  archive_dir: E:/Documents/cookbook ingestion/archive
+  failed_dir: E:/Documents/cookbook ingestion/failed
+  logs_dir: E:/Documents/cookbook ingestion/logs
+  vault_root: D:/Documents/Obsidian Vault
+  recipe_template: D:/Documents/Obsidian Vault/60-Templates/[Template] Recipe Card.md
+  recipes_root: D:/Documents/Obsidian Vault/80-Recipes
+  staging_root: D:/Documents/Obsidian Vault/80-Recipes/00-Staging
+  db_path: E:/Documents/cookbook ingestion/cookbook_ingest.sqlite3
+
+processing:
+  accepted_extensions:
+    - .epub
+    - .pdf
+    - .mobi
+  copy_stability_wait_seconds: 2.0
+  duplicate_threshold: 0.86
+  min_recipe_score: 3
+  ocr_text_density_threshold: 80
+
+llm:
+  enabled: false
+  base_url: http://localhost:11434/v1
+  api_key_env: OPENAI_API_KEY
+  structuring_model: Qwen/Qwen2.5-14B-Instruct
+  vision_model: Qwen/Qwen2.5-VL-7B-Instruct
+  timeout_seconds: 180
+  max_input_chars: 16000
+
+classification:
+  top_level_defaults:
+    baking:
+      - bread
+      - dough
+      - cookie
+      - cake
+      - pie
+      - tart
+      - muffin
+      - biscuit
+      - pastry
+      - brownie
+    savory:
+      - sauce
+      - pizza
+      - soup
+      - stew
+      - pasta
+      - roast
+      - salad
+      - casserole
+  subcategory_keywords:
+    Bread:
+      - bread
+      - loaf
+      - sourdough
+      - focaccia
+      - brioche
+    Pizza Dough:
+      - pizza dough
+      - dough
+      - levain
+      - poolish
+    Sweets:
+      - cookie
+      - cake
+      - tart
+      - pie
+      - sweet
+      - dessert
+      - brownie
+    Pizza:
+      - pizza
+      - tomato sauce
+      - red sauce
+      - fillets
